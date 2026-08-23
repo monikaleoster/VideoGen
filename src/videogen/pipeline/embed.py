@@ -18,6 +18,7 @@ determined.
 """
 
 import asyncio
+import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,8 @@ from pptx import Presentation
 from pptx.util import Emu
 
 from videogen.pipeline.base import StepState, StepStatus
+
+logger = logging.getLogger(__name__)
 
 # A 1x1 EMU placeholder — this is a narration track, not a video, so its
 # on-slide visual footprint isn't a design concern for this phase.
@@ -70,11 +73,13 @@ def _embed_audio(pptx_path: str, audio_paths: list[str | None], out_path: Path) 
     presentation = Presentation(pptx_path)
     slides_embedded: list[bool] = []
 
-    for slide, audio_path in zip(presentation.slides, audio_paths, strict=True):
+    for i, (slide, audio_path) in enumerate(zip(presentation.slides, audio_paths, strict=True), start=1):
         if audio_path is None:
+            logger.debug("Slide %d: no audio, leaving untouched", i)
             slides_embedded.append(False)
             continue
 
+        logger.debug("Slide %d: embedding %s, setting autoplay", i, audio_path)
         slide.shapes.add_movie(
             audio_path,
             left=Emu(0),
@@ -87,6 +92,7 @@ def _embed_audio(pptx_path: str, audio_paths: list[str | None], out_path: Path) 
         slides_embedded.append(True)
 
     presentation.save(str(out_path))
+    logger.info("Embedded audio into %d/%d slide(s), saved to %s", sum(slides_embedded), len(slides_embedded), out_path)
     return slides_embedded
 
 
@@ -95,6 +101,7 @@ async def run_embed(step_input: EmbedInput) -> EmbedOutput:
     state.status = StepStatus.RUNNING
     state.output = None
     state.approval_event.clear()
+    logger.info("embed starting: local_pptx_path=%s", step_input.local_pptx_path)
 
     source_path = Path(step_input.local_pptx_path)
     work_dir = Path(tempfile.mkdtemp(prefix="videogen_embed_"))

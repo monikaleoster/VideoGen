@@ -6,9 +6,12 @@ block/unblock mechanism.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from videogen.pipeline.base import StepState, StepStatus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,6 +34,7 @@ async def run_audio_upload(step_input: AudioUploadInput) -> AudioUploadOutput:
     state.status = StepStatus.RUNNING
     state.output = None
     state.approval_event.clear()
+    logger.info("audio_upload starting (stub — Phase 9): %d file(s)", len(step_input.audio_paths))
 
     await asyncio.sleep(0.1)
 
@@ -39,6 +43,7 @@ async def run_audio_upload(step_input: AudioUploadInput) -> AudioUploadOutput:
         drive_file_ids=file_ids,
         drive_urls=[f"https://drive.google.com/file/d/{fid}/view" for fid in file_ids],
     )
+    logger.info("audio_upload complete (stub): %d fake file id(s)", len(file_ids))
     state.output = output
     state.status = StepStatus.WAITING_APPROVAL
 

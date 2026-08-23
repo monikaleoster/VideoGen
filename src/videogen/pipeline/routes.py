@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +11,8 @@ from videogen.pipeline.notes_extraction import (
     state,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/steps/notes-extraction")
 
 _DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "sample_deck.pptx"
@@ -20,6 +23,7 @@ async def run() -> dict[str, str]:
     if state.status in (StepStatus.RUNNING, StepStatus.WAITING_APPROVAL):
         raise HTTPException(status_code=409, detail="Step is already running")
 
+    logger.info("legacy /steps/notes-extraction/run: local_pptx_path=%s", _DEMO_PPTX_PATH)
     asyncio.create_task(
         run_notes_extraction(NotesExtractionInput(local_pptx_path=str(_DEMO_PPTX_PATH)))
     )

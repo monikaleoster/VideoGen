@@ -67,7 +67,7 @@ def _audio_upload_input(request_data: dict[str, Any]) -> audio_upload.AudioUploa
 def _embed_input(request_data: dict[str, Any]) -> embed.EmbedInput:
     return embed.EmbedInput(
         local_pptx_path=download.state.output.local_pptx_path,
-        drive_file_ids=audio_upload.state.output.drive_file_ids,
+        audio_paths=tts.state.output.audio_paths,
     )
 
 

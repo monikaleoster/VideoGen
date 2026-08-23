@@ -1,6 +1,10 @@
 import asyncio
+import subprocess
+from pathlib import Path
 
 import pytest
+from pptx import Presentation
+from pptx.oxml.ns import qn
 
 from videogen.pipeline.base import StepStatus
 from videogen.pipeline.embed import EmbedInput, run_embed, state
@@ -17,12 +21,55 @@ def reset_state():
     state.approval_event = asyncio.Event()
 
 
-async def test_step_blocks_until_approved() -> None:
-    task = asyncio.create_task(
-        run_embed(EmbedInput(local_pptx_path="/tmp/deck.pptx", drive_file_ids=["id1", "id2"]))
-    )
+@pytest.fixture
+def deck_path(tmp_path: Path) -> str:
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[6])
+    prs.slides.add_slide(prs.slide_layouts[6])
+    prs.slides.add_slide(prs.slide_layouts[6])
+    path = tmp_path / "deck.pptx"
+    prs.save(str(path))
+    return str(path)
 
-    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=1.0)
+
+@pytest.fixture
+def real_clip(tmp_path: Path) -> str:
+    """A real, short MP3 clip (not silence) to distinguish from the
+    placeholder in tests."""
+    out_path = tmp_path / "clip.mp3"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-q:a",
+            "9",
+            "-acodec",
+            "libmp3lame",
+            str(out_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return str(out_path)
+
+
+def _audio_shapes(slide):
+    return [shape for shape in slide.shapes if shape._element.find(f".//{qn('a:audioFile')}") is not None]
+
+
+def _has_autoplay_timing(slide) -> bool:
+    timing = slide._element.find(qn("p:timing"))
+    return timing is not None and timing.find(f".//{qn('p:cmd')}") is not None
+
+
+async def test_step_blocks_until_approved(deck_path: str, real_clip: str) -> None:
+    task = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
+
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
     assert state.status == StepStatus.WAITING_APPROVAL
 
     await asyncio.sleep(0.05)
@@ -35,22 +82,59 @@ async def test_step_blocks_until_approved() -> None:
         pass
 
 
-async def test_step_resumes_and_completes_after_approval() -> None:
-    task = asyncio.create_task(
-        run_embed(
-            EmbedInput(local_pptx_path="/tmp/deck.pptx", drive_file_ids=["id1", "id2", "id3"])
-        )
-    )
+async def test_step_resumes_and_completes_after_approval(deck_path: str, real_clip: str) -> None:
+    task = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
 
-    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=1.0)
-
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
     state.approval_event.set()
-    output = await asyncio.wait_for(task, timeout=1.0)
+    output = await asyncio.wait_for(task, timeout=5.0)
 
     assert state.status == StepStatus.DONE
     assert output.updated_pptx_path
     assert output.slides_embedded == [True, True, True]
+    assert output.used_placeholder == [False, True, True]
     assert state.output is output
+
+
+async def test_real_clip_and_placeholder_are_both_embedded_with_autoplay(deck_path: str, real_clip: str) -> None:
+    task = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
+    state.approval_event.set()
+    output = await asyncio.wait_for(task, timeout=5.0)
+
+    prs = Presentation(output.updated_pptx_path)
+    assert len(prs.slides) == 3
+
+    for slide in prs.slides:
+        audio_shapes = _audio_shapes(slide)
+        assert len(audio_shapes) == 1, "each slide must have exactly one audio element"
+        assert _has_autoplay_timing(slide), "audio must be set to autoplay on slide entry"
+
+        shape = audio_shapes[0]
+        assert shape.width == shape.height == 1, "media placeholder/icon must be hidden"
+
+
+async def test_rerunning_the_step_does_not_duplicate_audio(deck_path: str, real_clip: str) -> None:
+    task = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
+    state.approval_event.set()
+    await asyncio.wait_for(task, timeout=5.0)
+
+    state.status = StepStatus.PENDING
+    state.output = None
+    state.approval_event = asyncio.Event()
+
+    # Re-run against the same pristine source deck, as the real pipeline
+    # does after a per-slide TTS regeneration (runner.py always passes the
+    # download step's untouched local_pptx_path, never embed's own output).
+    task2 = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
+    state.approval_event.set()
+    output2 = await asyncio.wait_for(task2, timeout=5.0)
+
+    prs = Presentation(output2.updated_pptx_path)
+    for slide in prs.slides:
+        assert len(_audio_shapes(slide)) == 1
 
 
 async def _wait_for_status(target: StepStatus) -> None:

@@ -13,7 +13,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   specific yet.
 - **Validate:** `uv run` starts the server; health route responds; a
   WebSocket client can connect and receive an echoed message.
-- Status: ⬜
+- Status: ✅
 
 ## Phase 1 — Mock pipeline, single step
 - Define the pipeline step interface (input, output, status message) and

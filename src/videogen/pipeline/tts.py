@@ -41,6 +41,13 @@ class TtsOutput:
 # Module-level state so the CLI and HTTP routes reach the same in-flight run.
 state: StepState[TtsOutput] = StepState()
 
+# The current run's working directory, so a single-slide regenerate (see
+# `regenerate_slide`) writes alongside the rest of that run's clips instead
+# of scattering files across unrelated temp dirs. Set at the start of each
+# `run_tts` call; a regenerate before any run has ever happened creates its
+# own directory instead of reusing a stale/missing one.
+_current_work_dir: Path | None = None
+
 
 def _synthesize(text: str, api_key: str, voice_id: str) -> bytes:
     """Call ElevenLabs once for `text`, returning raw MP3 bytes.
@@ -89,11 +96,14 @@ def _generate_one(
 
 async def run_tts(step_input: TtsInput) -> TtsOutput:
     """Run real per-slide synthesis, blocking on `state.approval_event` until approved."""
+    global _current_work_dir
+
     state.status = StepStatus.RUNNING
     state.output = None
     state.approval_event.clear()
 
     work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
+    _current_work_dir = work_dir
 
     audio_paths: list[str | None] = []
     durations_sec: list[float | None] = []
@@ -123,3 +133,18 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
 
     state.status = StepStatus.DONE
     return output
+
+
+async def regenerate_slide(index: int, text: str, api_key: str, voice_id: str) -> tuple[str, float]:
+    """Regenerate a single slide's audio in place, independent of the rest
+    of the step's output — a manual per-slide "Generate" action, not part
+    of the full `run_tts` flow. `index` is 0-based. Any ElevenLabs error
+    propagates unmodified, same as the full run's per-slide calls."""
+    global _current_work_dir
+
+    if _current_work_dir is None:
+        _current_work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
+
+    out_path = _current_work_dir / f"slide_{index + 1:02d}.mp3"
+    duration = await asyncio.to_thread(_generate_one, text, api_key, voice_id, out_path)
+    return str(out_path), duration

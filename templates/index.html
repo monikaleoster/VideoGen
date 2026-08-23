@@ -32,6 +32,7 @@
       <input type="password" data-role="api-key" placeholder="ElevenLabs API key" autocomplete="off">
       <input type="text" data-role="voice-id" placeholder="ElevenLabs voice ID" autocomplete="off">
     </div>
+    <div data-role="tts-slides"></div>
     {% endif %}
     <div data-role="actions"></div>
   </div>
@@ -68,7 +69,84 @@ function render(snapshot) {
       actions.appendChild(makeButton("Approve", () => postAction(name, "approve")));
       actions.appendChild(makeButton("Reject", () => postAction(name, "reject")));
     }
+
+    if (name === "tts") {
+      renderTtsSlides(row, step, snapshot.notes_extraction);
+    }
   }
+}
+
+// Rebuilds the per-slide rows only when the number of slides changes (a
+// fresh run), so an in-progress edit to a slide's text box isn't wiped out
+// by a routine WebSocket status update; audio/duration display always
+// refreshes in place.
+function renderTtsSlides(row, ttsStep, notesStep) {
+  const container = row.querySelector('[data-role="tts-slides"]');
+  const notes = notesStep?.output?.notes ?? [];
+  const hasNotes = notesStep?.output?.has_notes ?? [];
+  const audioPaths = ttsStep.output?.audio_paths ?? [];
+  const durations = ttsStep.output?.durations_sec ?? [];
+
+  if (audioPaths.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  if (container.dataset.slideCount !== String(audioPaths.length)) {
+    container.innerHTML = "";
+    container.dataset.slideCount = String(audioPaths.length);
+
+    const generateAllBtn = makeButton("Generate All", () =>
+      postAction("tts", ttsStep.status === "pending" ? "run" : "reject")
+    );
+    generateAllBtn.style.marginBottom = "0.5rem";
+    container.appendChild(generateAllBtn);
+
+    audioPaths.forEach((_, i) => {
+      const slideRow = document.createElement("div");
+      slideRow.dataset.slideIndex = String(i);
+      slideRow.style.marginBottom = "0.4rem";
+
+      const label = document.createElement("span");
+      label.textContent = `Slide ${i + 1}${hasNotes[i] ? "" : " (no notes)"}: `;
+
+      const textInput = document.createElement("input");
+      textInput.type = "text";
+      textInput.dataset.role = "slide-text";
+      textInput.style.width = "40%";
+      textInput.value = notes[i] ?? "";
+
+      const audioLabel = document.createElement("span");
+      audioLabel.dataset.role = "slide-audio-label";
+      audioLabel.style.margin = "0 0.5rem";
+
+      const generateBtn = makeButton("Generate", () => generateSlide(row, i));
+
+      slideRow.append(label, textInput, generateBtn, audioLabel);
+      container.appendChild(slideRow);
+    });
+  }
+
+  audioPaths.forEach((path, i) => {
+    const audioLabel = container.querySelector(
+      `[data-slide-index="${i}"] [data-role="slide-audio-label"]`
+    );
+    if (!audioLabel) return;
+    audioLabel.textContent =
+      path !== null ? `${path} (${durations[i]?.toFixed(1)}s)` : "no audio";
+  });
+}
+
+async function generateSlide(ttsRow, index) {
+  const creds = ttsCredentials(ttsRow);
+  const text = ttsRow.querySelector(
+    `[data-slide-index="${index}"] [data-role="slide-text"]`
+  ).value;
+  await fetch(`/pipeline/tts/slide/${index}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...creds, text }),
+  });
 }
 
 function makeButton(label, onClick) {

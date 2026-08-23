@@ -243,6 +243,45 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
     return {"status": step.state.status.value}
 
 
+@router.post("/pipeline/tts/slide/{index}/generate")
+async def generate_tts_slide(index: int, request_data: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Regenerate a single slide's audio in place, independent of the rest
+    of the tts step's output — for the per-slide "Generate" button. Also
+    backs the "Generate All" flow's per-slide entries when a slide's text
+    override differs from the notes_extraction text (the whole-step
+    Run/Reject path is used when no per-slide overrides are needed)."""
+    if tts.state.output is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Run the tts step at least once before regenerating an individual slide",
+        )
+
+    audio_paths = tts.state.output.audio_paths
+    if not (0 <= index < len(audio_paths)):
+        raise HTTPException(status_code=404, detail=f"Slide index {index} is out of range")
+
+    api_key = request_data.get("api_key")
+    voice_id = request_data.get("voice_id")
+    text = request_data.get("text", "")
+    if not api_key or not voice_id:
+        raise HTTPException(
+            status_code=422, detail="'api_key' and 'voice_id' are both required"
+        )
+    if not text or not text.strip():
+        raise HTTPException(
+            status_code=422, detail="'text' must be non-empty to generate audio for this slide"
+        )
+
+    try:
+        audio_path, duration = await tts.regenerate_slide(index, text.strip(), api_key, voice_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Slide {index} generation failed: {exc}") from None
+
+    tts.state.output.audio_paths[index] = audio_path
+    tts.state.output.durations_sec[index] = duration
+    return {"audio_path": audio_path, "duration_sec": duration}
+
+
 @router.websocket("/ws/pipeline-status")
 async def ws_pipeline_status(websocket: WebSocket) -> None:
     await websocket.accept()

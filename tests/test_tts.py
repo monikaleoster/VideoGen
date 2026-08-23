@@ -5,8 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
+from videogen.pipeline import tts as tts_module
 from videogen.pipeline.base import StepStatus
-from videogen.pipeline.tts import TtsInput, run_tts, state
+from videogen.pipeline.tts import TtsInput, regenerate_slide, run_tts, state
 
 
 @pytest.fixture(autouse=True)
@@ -14,10 +15,12 @@ def reset_state():
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
+    tts_module._current_work_dir = None
     yield
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
+    tts_module._current_work_dir = None
 
 
 @pytest.fixture
@@ -159,3 +162,36 @@ async def test_step_blocks_until_approved(silent_mp3_bytes) -> None:
 async def _wait_for_status(target: StepStatus) -> None:
     while state.status != target:
         await asyncio.sleep(0.01)
+
+
+async def test_regenerate_slide_creates_own_work_dir_when_no_prior_run(silent_mp3_bytes) -> None:
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes) as mock_synth:
+        audio_path, duration = await regenerate_slide(0, "Custom override text.", "fake-key", "fake-voice")
+
+    mock_synth.assert_called_once_with("Custom override text.", "fake-key", "fake-voice")
+    assert Path(audio_path).exists()
+    assert duration == pytest.approx(1.5, abs=0.2)
+
+
+async def test_regenerate_slide_reuses_the_current_run_work_dir(silent_mp3_bytes) -> None:
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        task = asyncio.create_task(
+            run_tts(
+                TtsInput(
+                    notes=["Slide one.", ""],
+                    has_notes=[True, False],
+                    api_key="fake-key",
+                    voice_id="fake-voice",
+                )
+            )
+        )
+        await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
+        state.approval_event.set()
+        first_output = await asyncio.wait_for(task, timeout=10.0)
+
+        # Regenerate slide 2 (originally skipped, no notes) with override text.
+        audio_path, duration = await regenerate_slide(1, "Manual override for slide 2.", "fake-key", "fake-voice")
+
+    assert Path(audio_path).parent == Path(first_output.audio_paths[0]).parent
+    assert audio_path != first_output.audio_paths[0]
+    assert duration == pytest.approx(1.5, abs=0.2)

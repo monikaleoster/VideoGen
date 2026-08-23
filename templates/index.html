@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VideoGen — Pipeline</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.25rem; }
+  .step { border: 1px solid #ccc; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; }
+  .step-header { display: flex; justify-content: space-between; align-items: center; }
+  .status { font-family: monospace; padding: 0.1rem 0.5rem; border-radius: 4px; background: #eee; }
+  .status-pending { background: #eee; }
+  .status-running { background: #ffe9a8; }
+  .status-waiting_approval { background: #ffd0a8; }
+  .status-done { background: #b7f5b7; }
+  pre { background: #f7f7f7; padding: 0.5rem; overflow-x: auto; font-size: 0.85rem; }
+  button { margin-right: 0.5rem; padding: 0.3rem 0.8rem; }
+</style>
+</head>
+<body>
+<h1>VideoGen — Mock Pipeline</h1>
+<div id="steps">
+{% for step in steps %}
+  <div class="step" data-step="{{ step.name }}">
+    <div class="step-header">
+      <strong>{{ step.display_name }}</strong>
+      <span class="status status-pending" data-role="status">pending</span>
+    </div>
+    <pre data-role="output" hidden></pre>
+    <div data-role="actions"></div>
+  </div>
+{% endfor %}
+</div>
+
+<script>
+function render(snapshot) {
+  for (const [name, step] of Object.entries(snapshot)) {
+    const row = document.querySelector(`.step[data-step="${name}"]`);
+    if (!row) continue;
+
+    const statusEl = row.querySelector('[data-role="status"]');
+    statusEl.textContent = step.status;
+    statusEl.className = `status status-${step.status}`;
+
+    const outputEl = row.querySelector('[data-role="output"]');
+    if (step.output !== null) {
+      outputEl.textContent = JSON.stringify(step.output, null, 2);
+      outputEl.hidden = false;
+    } else {
+      outputEl.hidden = true;
+    }
+
+    const actions = row.querySelector('[data-role="actions"]');
+    actions.innerHTML = "";
+    if (step.status === "pending") {
+      actions.appendChild(makeButton("Run", () => postAction(name, "run")));
+    } else if (step.status === "waiting_approval") {
+      actions.appendChild(makeButton("Approve", () => postAction(name, "approve")));
+      actions.appendChild(makeButton("Reject", () => postAction(name, "reject")));
+    }
+  }
+}
+
+function makeButton(label, onClick) {
+  const btn = document.createElement("button");
+  btn.textContent = label;
+  btn.onclick = onClick;
+  return btn;
+}
+
+async function postAction(step, action) {
+  await fetch(`/pipeline/${step}/${action}`, { method: "POST" });
+}
+
+const ws = new WebSocket(`ws://${location.host}/ws/pipeline-status`);
+ws.onmessage = (event) => render(JSON.parse(event.data));
+</script>
+</body>
+</html>

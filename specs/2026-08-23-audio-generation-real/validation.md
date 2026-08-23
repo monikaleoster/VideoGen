@@ -121,16 +121,14 @@ Performed by: Claude (session, monikaleoster@gmail.com) — 2026-08-23
 
 ## Result
 
-- Automated checks: done — 31/31 tests pass.
-- Manual verification: done for everything not requiring real ElevenLabs
-  network access, which this sandbox cannot reach; **real-credential
-  audio-quality/duration verification (item 2 above) is still owed by a
-  human before this phase is fully validated.**
-- Outcome: ready to merge pending that one human-only check.
+- Automated checks: done — 31/31 tests pass (40/40 after the follow-up
+  per-slide regenerate and audio-player additions).
+- Manual verification: done, including item 2 (real-credential audio
+  quality/duration) — completed and approved by the human 2026-08-23.
+- Outcome: merged, fully validated.
 
 ## Roadmap update
 
-Phase 7 marked 🚧 (not ✅) in `specs/roadmap.md` — implementation and
-automated (mocked) validation are done, but real-credential audio
-quality/duration verification is still owed by a human before this
-phase is considered fully validated and the status flips to ✅.
+Phase 7 marked ✅ in `specs/roadmap.md` — real-credential audio
+quality/duration verification completed and approved by the human
+2026-08-23.

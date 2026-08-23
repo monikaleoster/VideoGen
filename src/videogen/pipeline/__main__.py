@@ -14,16 +14,14 @@ import os
 import sys
 from pathlib import Path
 
+from videogen.logging_config import configure_logging
 from videogen.pipeline.base import StepState, StepStatus
 from videogen.pipeline.runner import run, run_pipeline
 
 _DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "sample_deck.pptx"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("videogen.pipeline")
+configure_logging()
+logger = logging.getLogger(__name__)
 
 # Steps in fixed roadmap order, paired with a human-readable name for logs.
 _STEPS: list[tuple[str, StepState]] = [

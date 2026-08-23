@@ -58,11 +58,16 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 ## Phase 5 — Video generation (already validated, re-validate)
 - Re-validate the existing video generation step (slide images + audio →
   final MP4) against real images from Phase 4, replacing the placeholder
-  images used previously.
+  images used previously. Real ffmpeg per-slide segment rendering
+  (static image + real audio track), concatenated in order; a slide with
+  no audio gets a fixed 3-second silent fallback segment rather than
+  being dropped. Real duration measured via ffprobe.
 - **Validate:** output duration/sync matches expected values, both audio
   and video streams present, graceful fallback for a slide with no audio.
-- Status: ✅ (done against placeholders; re-validation against real images
-  pending as this phase is reached)
+- Status: ✅ (re-validated against real Phase 4/7 inputs 2026-08-23 — see
+  `specs/2026-08-23-render-real-and-logging/`; previously marked done
+  against placeholders only, which was misleading — the step was still a
+  full stub until this work)
 
 ## Phase 6 — Notes extraction (real)
 - Replace the mock notes-extraction step with real `python-pptx` parsing

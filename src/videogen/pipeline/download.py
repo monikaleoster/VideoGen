@@ -8,6 +8,7 @@ to slide-image PNGs. Real Google Drive integration is deferred.
 """
 
 import asyncio
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from videogen.pipeline.base import StepState, StepStatus
+
+logger = logging.getLogger(__name__)
 
 SLIDE_WIDTH_PX = 1920
 SLIDE_HEIGHT_PX = 1080
@@ -47,6 +50,7 @@ def _convert_to_slide_images(pptx_path: Path, work_dir: Path) -> list[Path]:
     profile_dir = work_dir / "lo_profile"
     profile_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.debug("Converting %s to PDF via LibreOffice headless in %s", pptx_path, work_dir)
     subprocess.run(
         [
             "soffice",
@@ -66,8 +70,10 @@ def _convert_to_slide_images(pptx_path: Path, work_dir: Path) -> list[Path]:
     pdf_path = work_dir / f"{pptx_path.stem}.pdf"
     if not pdf_path.exists():
         raise RuntimeError(f"LibreOffice did not produce a PDF at {pdf_path}")
+    logger.debug("PDF produced: %s", pdf_path)
 
     image_prefix = work_dir / "slide"
+    logger.debug("Converting %s to PNGs via pdftoppm at %dx%d", pdf_path, SLIDE_WIDTH_PX, SLIDE_HEIGHT_PX)
     subprocess.run(
         [
             "pdftoppm",
@@ -95,6 +101,7 @@ def _convert_to_slide_images(pptx_path: Path, work_dir: Path) -> list[Path]:
         final_path = work_dir / f"slide_{i:02d}.png"
         raw.rename(final_path)
         final_paths.append(final_path)
+    logger.info("Converted %s to %d slide image(s) in %s", pptx_path, len(final_paths), work_dir)
     return final_paths
 
 
@@ -104,10 +111,13 @@ async def run_download(step_input: DownloadInput) -> DownloadOutput:
     state.output = None
     state.approval_event.clear()
 
+    logger.info("download starting: local_pptx_path=%s", step_input.local_pptx_path)
+
     source_path = Path(step_input.local_pptx_path)
     work_dir = Path(tempfile.mkdtemp(prefix="videogen_download_"))
     local_copy = work_dir / source_path.name
     shutil.copy2(source_path, local_copy)
+    logger.debug("Copied source deck to %s", local_copy)
 
     # LibreOffice/pdftoppm are blocking subprocess calls — run them off the
     # event loop thread so the WebSocket status push keeps working live.
@@ -118,6 +128,7 @@ async def run_download(step_input: DownloadInput) -> DownloadOutput:
         slide_image_paths=[str(p) for p in slide_images],
         slide_count=len(slide_images),
     )
+    logger.info("download complete: %d slide(s)", output.slide_count)
     state.output = output
     state.status = StepStatus.WAITING_APPROVAL
 

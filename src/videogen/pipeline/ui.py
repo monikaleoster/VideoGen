@@ -7,6 +7,7 @@ logic lives here (that stays inside each step module, per tech-stack.md).
 """
 
 import asyncio
+import logging
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -24,6 +25,8 @@ from videogen.pipeline import (
     video_upload,
 )
 from videogen.pipeline.base import StepState, StepStatus
+
+logger = logging.getLogger(__name__)
 
 # No real Drive integration — download takes a local .pptx path per
 # specs/2026-08-23-download-and-slide-images/requirements.md. The UI's
@@ -174,6 +177,7 @@ async def _await_step_settled(step: _StepEntry, task: asyncio.Task) -> None:
     while step.state.status not in (StepStatus.WAITING_APPROVAL, StepStatus.DONE):
         if task.done() and task.exception() is not None:
             exc = task.exception()
+            logger.warning("Step '%s' failed: %s", step.name, exc)
             step.state.status = StepStatus.PENDING
             step.state.output = None
             raise HTTPException(status_code=502, detail=f"Step '{step.name}' failed: {exc}")
@@ -203,8 +207,10 @@ async def run_step(step_name: str, request_data: dict[str, Any] | None = Body(de
     if step.state.status in (StepStatus.RUNNING, StepStatus.WAITING_APPROVAL):
         raise HTTPException(status_code=409, detail=f"Step '{step_name}' is already running")
 
+    logger.info("UI: run '%s'", step_name)
     task = asyncio.create_task(step.run_fn(step.build_input(request_data or {})))
     await _await_step_settled(step, task)
+    logger.info("UI: '%s' -> %s", step_name, step.state.status.value)
     return {"status": step.state.status.value}
 
 
@@ -218,6 +224,7 @@ async def approve_step(step_name: str) -> dict[str, str]:
             detail=f"Step '{step_name}' is not waiting for approval (status={step.state.status.value})",
         )
 
+    logger.info("UI: approve '%s'", step_name)
     step.state.approval_event.set()
     while step.state.status != StepStatus.DONE:
         await asyncio.sleep(0.01)
@@ -234,6 +241,7 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
             detail=f"Step '{step_name}' is not waiting for approval (status={step.state.status.value})",
         )
 
+    logger.info("UI: reject '%s' (re-running)", step_name)
     task = asyncio.create_task(step.run_fn(step.build_input(request_data or {})))
     # Wait for the fresh run to actually start (status flips away from the
     # stale WAITING_APPROVAL) before waiting for it to settle again —
@@ -241,6 +249,7 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
     while step.state.status == StepStatus.WAITING_APPROVAL:
         if task.done() and task.exception() is not None:
             exc = task.exception()
+            logger.warning("Step '%s' failed on reject-rerun: %s", step_name, exc)
             step.state.status = StepStatus.PENDING
             step.state.output = None
             raise HTTPException(status_code=502, detail=f"Step '{step_name}' failed: {exc}")
@@ -278,9 +287,11 @@ async def generate_tts_slide(index: int, request_data: dict[str, Any] = Body(...
             status_code=422, detail="'text' must be non-empty to generate audio for this slide"
         )
 
+    logger.info("UI: regenerate tts slide %d", index)
     try:
         audio_path, duration = await tts.regenerate_slide(index, text.strip(), api_key, voice_id)
     except Exception as exc:
+        logger.warning("UI: regenerate tts slide %d failed: %s", index, exc)
         raise HTTPException(status_code=502, detail=f"Slide {index} generation failed: {exc}") from None
 
     tts.state.output.audio_paths[index] = audio_path

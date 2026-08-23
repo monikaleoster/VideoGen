@@ -8,6 +8,7 @@ retried — the human re-runs manually via the existing Reject action.
 """
 
 import asyncio
+import logging
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs.types.voice_settings import VoiceSettings
 
 from videogen.pipeline.base import StepState, StepStatus
+
+logger = logging.getLogger(__name__)
 
 # Fixed per specs/2026-08-23-audio-generation-real/requirements.md — not
 # user-configurable per run.
@@ -55,6 +58,9 @@ def _synthesize(text: str, api_key: str, voice_id: str) -> bytes:
     Any API error (auth, rate limit, network) propagates unmodified — no
     retry, per the confirmed no-auto-retry scope decision.
     """
+    # Never log `api_key` — this is the only credential-adjacent value in
+    # this module and it must never appear in log output.
+    logger.debug("Calling ElevenLabs: voice_id=%s, %d char(s) of text", voice_id, len(text))
     client = ElevenLabs(api_key=api_key)
     chunks = client.text_to_speech.convert(
         voice_id,
@@ -62,7 +68,9 @@ def _synthesize(text: str, api_key: str, voice_id: str) -> bytes:
         voice_settings=_VOICE_SETTINGS,
         output_format=_OUTPUT_FORMAT,
     )
-    return b"".join(chunks)
+    audio_bytes = b"".join(chunks)
+    logger.debug("ElevenLabs returned %d byte(s)", len(audio_bytes))
+    return audio_bytes
 
 
 def _probe_duration_sec(audio_path: Path) -> float:
@@ -102,6 +110,12 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
     state.output = None
     state.approval_event.clear()
 
+    slide_count = len(step_input.notes)
+    logger.info(
+        "tts starting: %d slide(s), %d with notes, voice_id=%s",
+        slide_count, sum(step_input.has_notes), step_input.voice_id,
+    )
+
     work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
     _current_work_dir = work_dir
 
@@ -114,6 +128,7 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
         zip(step_input.notes, step_input.has_notes, strict=True), start=1
     ):
         if not has_notes:
+            logger.debug("Slide %d: no notes, skipping ElevenLabs call", i)
             audio_paths.append(None)
             durations_sec.append(None)
             continue
@@ -122,10 +137,12 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
         duration = await asyncio.to_thread(
             _generate_one, text, step_input.api_key, step_input.voice_id, out_path
         )
+        logger.info("Slide %d/%d: generated %.1fs of audio (%s)", i, slide_count, duration, out_path.name)
         audio_paths.append(str(out_path))
         durations_sec.append(duration)
 
     output = TtsOutput(audio_paths=audio_paths, durations_sec=durations_sec)
+    logger.info("tts complete: %d clip(s) generated", sum(1 for p in audio_paths if p is not None))
     state.output = output
     state.status = StepStatus.WAITING_APPROVAL
 
@@ -145,6 +162,8 @@ async def regenerate_slide(index: int, text: str, api_key: str, voice_id: str) -
     if _current_work_dir is None:
         _current_work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
 
+    logger.info("Regenerating slide %d (index %d) on demand", index + 1, index)
     out_path = _current_work_dir / f"slide_{index + 1:02d}.mp3"
     duration = await asyncio.to_thread(_generate_one, text, api_key, voice_id, out_path)
+    logger.info("Slide %d regenerated: %.1fs (%s)", index + 1, duration, out_path.name)
     return str(out_path), duration

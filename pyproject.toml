@@ -5,6 +5,7 @@ description = "Turns a Google Drive slide deck into a fully narrated MP4 video."
 readme = "Readme.md"
 requires-python = ">=3.11"
 dependencies = [
+    "elevenlabs>=2.64.0",
     "fastapi>=0.115",
     "jinja2>=3.1.6",
     "python-pptx>=1.0.2",

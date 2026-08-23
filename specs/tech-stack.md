@@ -34,9 +34,17 @@
   reading the source `.pptx` and uploading every generated artifact
   (audio clips, updated `.pptx`, final `.mp4`) back to the same folder.
 - **ElevenLabs API** (`elevenlabs` Python SDK or direct HTTP calls) for
-  text-to-speech, single voice per run, driven by a user-supplied voice ID
-  and API key. Calls must respect ElevenLabs rate limits and retry on
-  transient failures.
+  text-to-speech, single voice per run, fixed stability/similarity
+  settings, driven by a user-supplied voice ID and API key entered per
+  run through the approval-gate UI and held in memory only for that run —
+  a deliberate deviation from this file's general secrets convention
+  below, confirmed with the human (see
+  `specs/2026-08-23-audio-generation-real/requirements.md`); the CLI demo
+  entry point has no UI and falls back to reading
+  `ELEVENLABS_API_KEY`/`ELEVENLABS_VOICE_ID` from the environment. Per
+  the same Phase 7 decision, calls are **not** retried on failure —
+  including rate-limit (429) responses; any failure is reported as a
+  step failure rather than retried.
 
 ## Slide & media processing
 
@@ -59,6 +67,10 @@
 
 - File naming for uploaded artifacts is predictable and slide-indexed,
   e.g. `slide_01_audio.mp3` — never freeform or timestamp-based names.
-- Secrets (ElevenLabs API key, Google Drive credentials) are read from
-  environment variables / a local `.env` (via `python-dotenv`), never
-  hardcoded or committed.
+- Secrets are never hardcoded or committed. Google Drive credentials are
+  read from environment variables / a local `.env` (via `python-dotenv`).
+  The ElevenLabs API key and voice ID are the one exception: per Phase
+  7's confirmed scope decision, they're entered per run through the
+  approval-gate UI and held in memory only for that run (not `.env`,
+  not browser storage); the CLI demo entry point, which has no UI, falls
+  back to environment variables for these two values only.

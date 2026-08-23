@@ -1,5 +1,7 @@
 import asyncio
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -8,6 +10,26 @@ from videogen.pipeline.base import StepStatus
 from videogen.pipeline.runner import run, run_pipeline
 
 SAMPLE_PPTX = str(Path(__file__).resolve().parent / "fixtures" / "sample_deck.pptx")
+
+
+@pytest.fixture
+def silent_mp3_bytes(tmp_path: Path) -> bytes:
+    """Real silence as MP3 bytes, so the real `tts` step's ffprobe duration
+    measurement has a real file to read, with no network access needed."""
+    out_path = tmp_path / "silence.mp3"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "1.0", "-q:a", "9", "-y", str(out_path)],
+        check=True,
+        capture_output=True,
+    )
+    return out_path.read_bytes()
+
+
+@pytest.fixture(autouse=True)
+def mock_elevenlabs(silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        yield
+
 
 _ALL_STATES = [
     ("download", download.state),
@@ -62,7 +84,7 @@ async def test_steps_run_in_fixed_order_and_none_skip_ahead() -> None:
     log: list[str] = []
     approver = asyncio.create_task(_approve_in_order(log))
     run_task = asyncio.create_task(
-        run_pipeline(local_pptx_path=SAMPLE_PPTX)
+        run_pipeline(local_pptx_path=SAMPLE_PPTX, elevenlabs_api_key="fake-key", elevenlabs_voice_id="fake-voice")
     )
 
     await asyncio.wait_for(asyncio.gather(approver, run_task), timeout=30.0)
@@ -89,7 +111,7 @@ async def test_steps_run_in_fixed_order_and_none_skip_ahead() -> None:
 async def test_chained_output_threads_through_the_pipeline() -> None:
     approver = asyncio.create_task(_approve_in_order([]))
     output = await asyncio.wait_for(
-        run_pipeline(local_pptx_path=SAMPLE_PPTX), timeout=30.0
+        run_pipeline(local_pptx_path=SAMPLE_PPTX, elevenlabs_api_key="fake-key", elevenlabs_voice_id="fake-voice"), timeout=30.0
     )
     await asyncio.wait_for(approver, timeout=30.0)
 
@@ -108,7 +130,7 @@ async def test_chained_output_threads_through_the_pipeline() -> None:
 
 async def test_full_run_reaches_video_upload_done() -> None:
     approver = asyncio.create_task(_approve_in_order([]))
-    await asyncio.wait_for(run_pipeline(local_pptx_path=SAMPLE_PPTX), timeout=30.0)
+    await asyncio.wait_for(run_pipeline(local_pptx_path=SAMPLE_PPTX, elevenlabs_api_key="fake-key", elevenlabs_voice_id="fake-voice"), timeout=30.0)
     await asyncio.wait_for(approver, timeout=30.0)
 
     assert run.video_upload.status == StepStatus.DONE

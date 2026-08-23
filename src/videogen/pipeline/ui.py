@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from videogen.pipeline import (
     audio_upload,
@@ -280,6 +281,20 @@ async def generate_tts_slide(index: int, request_data: dict[str, Any] = Body(...
     tts.state.output.audio_paths[index] = audio_path
     tts.state.output.durations_sec[index] = duration
     return {"audio_path": audio_path, "duration_sec": duration}
+
+
+@router.get("/pipeline/tts/slide/{index}/audio")
+async def get_tts_slide_audio(index: int) -> FileResponse:
+    """Serve a generated slide's MP3 so it can be linked/played directly
+    from the UI instead of the human having to locate the file on disk."""
+    if tts.state.output is None or not (0 <= index < len(tts.state.output.audio_paths)):
+        raise HTTPException(status_code=404, detail=f"No audio for slide {index}")
+
+    audio_path = tts.state.output.audio_paths[index]
+    if audio_path is None or not Path(audio_path).exists():
+        raise HTTPException(status_code=404, detail=f"No audio generated yet for slide {index}")
+
+    return FileResponse(audio_path, media_type="audio/mpeg")
 
 
 @router.websocket("/ws/pipeline-status")

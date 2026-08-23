@@ -122,18 +122,42 @@ function renderTtsSlides(row, ttsStep, notesStep) {
 
       const generateBtn = makeButton("Generate", () => generateSlide(row, i));
 
-      slideRow.append(label, textInput, generateBtn, audioLabel);
+      const audioPlayer = document.createElement("audio");
+      audioPlayer.dataset.role = "slide-audio-player";
+      audioPlayer.controls = true;
+      audioPlayer.style.verticalAlign = "middle";
+      audioPlayer.style.height = "1.75rem";
+      audioPlayer.hidden = true;
+
+      slideRow.append(label, textInput, generateBtn, audioLabel, audioPlayer);
       container.appendChild(slideRow);
     });
   }
 
   audioPaths.forEach((path, i) => {
-    const audioLabel = container.querySelector(
-      `[data-slide-index="${i}"] [data-role="slide-audio-label"]`
-    );
-    if (!audioLabel) return;
-    audioLabel.textContent =
-      path !== null ? `${path} (${durations[i]?.toFixed(1)}s)` : "no audio";
+    const slideRowEl = container.querySelector(`[data-slide-index="${i}"]`);
+    if (!slideRowEl) return;
+
+    const audioLabel = slideRowEl.querySelector('[data-role="slide-audio-label"]');
+    const audioPlayer = slideRowEl.querySelector('[data-role="slide-audio-player"]');
+    const audioUrl = `/pipeline/tts/slide/${i}/audio`;
+
+    if (path !== null) {
+      audioLabel.textContent = `${durations[i]?.toFixed(1)}s`;
+      // Only reassign `src` when it's actually changed — a regenerated
+      // slide's URL is identical (same path, overwritten in place), so
+      // reloading it every WebSocket tick would restart playback.
+      if (audioPlayer.dataset.loadedFor !== path) {
+        audioPlayer.src = audioUrl;
+        audioPlayer.dataset.loadedFor = path;
+      }
+      audioPlayer.hidden = false;
+    } else {
+      audioLabel.textContent = "no audio";
+      audioPlayer.hidden = true;
+      audioPlayer.removeAttribute("src");
+      delete audioPlayer.dataset.loadedFor;
+    }
   });
 }
 

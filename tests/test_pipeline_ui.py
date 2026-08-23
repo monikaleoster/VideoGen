@@ -198,3 +198,41 @@ async def test_generate_slide_requires_non_empty_text(client, silent_mp3_bytes):
                 json={"api_key": "k", "voice_id": "v", "text": "   "},
             )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_slide_audio_before_any_tts_run_is_404(client):
+    async with client as ac:
+        resp = await ac.get("/pipeline/tts/slide/0/audio")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_slide_audio_for_skipped_slide_is_404(client, silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+
+            # Fixture's slide 3 ("Thank You") has no notes, so tts skips it.
+            resp = await ac.get("/pipeline/tts/slide/2/audio")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_slide_audio_returns_the_real_generated_mp3(client, silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+
+            resp = await ac.get("/pipeline/tts/slide/0/audio")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "audio/mpeg"
+    assert resp.content == silent_mp3_bytes

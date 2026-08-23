@@ -10,6 +10,8 @@ approval-gate UI needs something to call.
 
 import asyncio
 import logging
+import os
+import sys
 from pathlib import Path
 
 from videogen.pipeline.base import StepState, StepStatus
@@ -64,11 +66,28 @@ async def _watch_and_auto_approve_in_order(delay: float) -> None:
 
 
 async def main() -> None:
+    # No UI here to collect ElevenLabs credentials interactively, so the CLI
+    # demo falls back to environment variables — a narrow, CLI-only
+    # exception; the approval-gate UI never reads or persists these.
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID")
+    if not api_key or not voice_id:
+        logger.error(
+            "ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID must both be set "
+            "in the environment to run the CLI demo pipeline (the tts "
+            "step calls the real ElevenLabs API)."
+        )
+        sys.exit(1)
+
     logger.info("Pipeline run starting")
 
     watcher = asyncio.create_task(_watch_and_auto_approve_in_order(delay=0.2))
 
-    output = await run_pipeline(local_pptx_path=str(_DEMO_PPTX_PATH))
+    output = await run_pipeline(
+        local_pptx_path=str(_DEMO_PPTX_PATH),
+        elevenlabs_api_key=api_key,
+        elevenlabs_voice_id=voice_id,
+    )
 
     await watcher
 

@@ -36,7 +36,9 @@ class PipelineRun:
 run = PipelineRun()
 
 
-async def run_pipeline(local_pptx_path: str) -> video_upload.VideoUploadOutput:
+async def run_pipeline(
+    local_pptx_path: str, elevenlabs_api_key: str, elevenlabs_voice_id: str
+) -> video_upload.VideoUploadOutput:
     """Run all seven steps in order, threading each step's output forward.
 
     Each step is awaited to `DONE` (i.e. its approval Event has been set and
@@ -52,7 +54,14 @@ async def run_pipeline(local_pptx_path: str) -> video_upload.VideoUploadOutput:
         )
     )
 
-    tts_output = await tts.run_tts(tts.TtsInput(notes=notes_output.notes))
+    tts_output = await tts.run_tts(
+        tts.TtsInput(
+            notes=notes_output.notes,
+            has_notes=notes_output.has_notes,
+            api_key=elevenlabs_api_key,
+            voice_id=elevenlabs_voice_id,
+        )
+    )
 
     audio_upload_output = await audio_upload.run_audio_upload(
         audio_upload.AudioUploadInput(audio_paths=tts_output.audio_paths)

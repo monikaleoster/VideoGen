@@ -27,12 +27,22 @@
       <span class="status status-pending" data-role="status">pending</span>
     </div>
     <pre data-role="output" hidden></pre>
+    {% if step.name == "tts" %}
+    <div data-role="credentials" style="margin-bottom: 0.5rem;">
+      <input type="password" data-role="api-key" placeholder="ElevenLabs API key" autocomplete="off">
+      <input type="text" data-role="voice-id" placeholder="ElevenLabs voice ID" autocomplete="off">
+    </div>
+    {% endif %}
     <div data-role="actions"></div>
   </div>
 {% endfor %}
 </div>
 
 <script>
+// The tts step's API key / voice ID fields are read live from the DOM at
+// Run/Reject time and never written to localStorage, cookies, or any
+// server-side file — they exist only in this page's in-memory state for
+// the run being submitted (per specs/2026-08-23-audio-generation-real).
 function render(snapshot) {
   for (const [name, step] of Object.entries(snapshot)) {
     const row = document.querySelector(`.step[data-step="${name}"]`);
@@ -68,8 +78,21 @@ function makeButton(label, onClick) {
   return btn;
 }
 
+function ttsCredentials(row) {
+  return {
+    api_key: row.querySelector('[data-role="api-key"]')?.value ?? "",
+    voice_id: row.querySelector('[data-role="voice-id"]')?.value ?? "",
+  };
+}
+
 async function postAction(step, action) {
-  await fetch(`/pipeline/${step}/${action}`, { method: "POST" });
+  const row = document.querySelector(`.step[data-step="${step}"]`);
+  const body = step === "tts" ? ttsCredentials(row) : {};
+  await fetch(`/pipeline/${step}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 const ws = new WebSocket(`ws://${location.host}/ws/pipeline-status`);

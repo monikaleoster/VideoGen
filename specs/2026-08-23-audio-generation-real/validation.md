@@ -5,61 +5,96 @@ Template below defines what "done" means.
 
 ## Automated validation
 
-- [ ] `uv run pytest` passes in full, no regressions in any existing
-      suite.
-- [ ] Unit tests (`tests/test_tts.py`), ElevenLabs client mocked:
-  - [ ] A slide with `has_notes=True` produces a real audio file (from
+- [x] `uv run pytest` passes in full, no regressions in any existing
+      suite — 31 passed.
+- [x] Unit tests (`tests/test_tts.py`), ElevenLabs client mocked:
+  - [x] A slide with `has_notes=True` produces a real audio file (from
         the mocked bytes) at a real path, and a duration measured from
-        that file (not a hardcoded/fake number).
-  - [ ] A slide with `has_notes=False` produces `audio_paths[i] is None`
+        that file (not a hardcoded/fake number) — verified via a real
+        ffprobe read of a real (silent) MP3.
+  - [x] A slide with `has_notes=False` produces `audio_paths[i] is None`
         and `durations_sec[i] is None`, and the mocked ElevenLabs client
         is asserted **not called** for that slide.
-  - [ ] A simulated ElevenLabs error (mock raises) propagates out of
+  - [x] A simulated ElevenLabs error (mock raises) propagates out of
         `run_tts` — the step does not swallow it or produce a fake
-        fallback output.
-  - [ ] The step's approval gate still blocks until
+        fallback output; verified the step does not reach
+        `WAITING_APPROVAL` for a failed run.
+  - [x] The step's approval gate still blocks until
         `state.approval_event` is set, then resumes and returns the same
         output.
-  - [ ] Calls are made sequentially, not concurrently (assert call order
-        / no overlapping in-flight calls against the mock).
-- [ ] `tests/test_runner.py` / `tests/test_pipeline_ui.py`: full pipeline
-      chain still completes correctly with the new `TtsInput` shape, no
-      ordering regressions.
+  - [x] Calls are sequential — `test_mixed_slides_only_calls_api_for_slides_with_notes`
+        asserts exactly 2 calls for a 3-slide mixed run, in slide order
+        (the implementation's `for` loop awaits each call before the
+        next, so there is no concurrency to race).
+- [x] `tests/test_runner.py` / `tests/test_pipeline_ui.py`: full pipeline
+      chain still completes correctly with the new `TtsInput` shape
+      (ElevenLabs client mocked via `_synthesize`), no ordering
+      regressions.
 
 ## Regression validation
 
-- [ ] `download` and `notes_extraction` steps' existing tests still pass
+- [x] `download` and `notes_extraction` steps' existing tests still pass
       unmodified.
 
 ## Build / lint / static analysis
 
-- [ ] `uv run pytest` (this repo's build/test gate).
+- [x] `uv run pytest` (this repo's build/test gate).
+
+## Bug found and fixed along the way (required to make this phase's own validation possible, not scope creep)
+
+- **The approval-gate UI's `/pipeline/{step}/run` and `/reject` routes
+  hung forever on a step failure.** Both routes only polled
+  `step.state.status` for `WAITING_APPROVAL`/`DONE`; a step whose task
+  raised an exception (exactly what real `tts` now does on any
+  ElevenLabs failure, per this phase's own "fail visibly, don't retry"
+  requirement) would never reach either status, so the HTTP request
+  hung indefinitely and the exception was only ever logged as "Task
+  exception was never retrieved" — invisible to the caller. This
+  directly contradicted this phase's own requirement that a failure be
+  visible, not silently swallowed. Fixed `_await_step_settled` (and the
+  reject route's pre-wait loop) to check the background task for a
+  raised exception on every poll tick and, if found, reset the step back
+  to `pending` and raise an `HTTPException(502, ...)` with the real error
+  — the step is then immediately re-runnable via the same Run action,
+  matching the "human retries manually" scope decision. Confirmed via a
+  real (network-blocked-in-this-sandbox) ElevenLabs call: before the fix,
+  the request hung; after, it returns `502` with the underlying error
+  message and the step resets to `pending`.
 
 ## Manual verification
 
-Performed by: <fill in> — <date>
+Performed by: Claude (session, monikaleoster@gmail.com) — 2026-08-23
 
-1. Run the full pipeline from the browser UI against the fixture deck;
-   confirm the `tts` step's new API key / voice ID fields appear before
-   its Run button and are required.
-2. **If real ElevenLabs credentials are available in this environment:**
-   run the `tts` step for real against 1-2 sample notes; confirm the
-   returned audio's quality and duration are as expected by listening to
-   the output file(s). **If no real credentials are available:** state
-   that explicitly here rather than fabricating a result — this step is
+1. Confirmed the index page (`GET /`) includes the `tts` step's API key
+   (password-type) and voice ID input fields, and that the JS sends their
+   live values with the Run/Reject request body.
+2. **Real ElevenLabs credentials are not available in this sandbox** (no
+   API key was provided, and this environment's outbound network policy
+   blocks `api.elevenlabs.io` at the proxy — confirmed via a real attempt,
+   which surfaced a proxy 403 rather than a fake success). This step is
    the one part of this phase's validation the automated (mocked) tests
-   cannot substitute for, and it should be completed by a human with
-   real credentials before this phase is considered fully validated.
-3. Trigger a deliberate failure (e.g. an invalid API key) and confirm the
-   step visibly fails rather than silently producing fake output, and
-   that the human can manually re-run it via the existing Reject action
-   once corrected.
-4. Confirm a slide with no notes (the fixture's "Thank You" slide) is
-   skipped — no ElevenLabs call attempted, `None` in both output lists —
-   and does not block or break the rest of the run.
-5. Run `uv run python -m videogen.pipeline` with
-   `ELEVENLABS_API_KEY`/`ELEVENLABS_VOICE_ID` unset — confirm it fails
-   with a clear error naming those variables, not a silent fake result.
+   cannot substitute for; **a human with a real ElevenLabs API key and
+   voice ID should run the `tts` step for real against 1-2 sample notes
+   and confirm audio quality/duration before this phase is considered
+   fully validated.**
+3. Triggered a deliberate failure (an invalid API key, which this
+   sandbox's network policy turned into a proxy error) via a real HTTP
+   request against the running app: the request returned
+   `502 {"detail": "Step 'tts' failed: 403 Forbidden"}` rather than
+   hanging or silently succeeding, and the step's status reset to
+   `pending`, confirming it's immediately re-runnable via the same Run
+   action (the "human retries manually" scope decision) rather than
+   needing a separate unstick mechanism. (This surfaced and led to the
+   route-hang bug fix above — before the fix, this same request hung.)
+4. Confirmed a slide with no notes (the fixture's "Thank You" slide) is
+   skipped — ran the full pipeline through `download` and
+   `notes_extraction`, confirmed via `tests/test_tts.py`'s mixed-slide
+   test that the mocked ElevenLabs client is called exactly twice for
+   the fixture's 3 slides (2 with notes, 1 without), with `None` in both
+   output lists for the skipped slide.
+5. Ran `uv run python -m videogen.pipeline` with
+   `ELEVENLABS_API_KEY`/`ELEVENLABS_VOICE_ID` unset: exited with code 1
+   and a clear error naming both variables, no silent fake result.
 
 ## Expected result
 
@@ -86,10 +121,16 @@ Performed by: <fill in> — <date>
 
 ## Result
 
-Not yet run — implementation has not started. This section is filled in
-after Plan.md's task group 6.
+- Automated checks: done — 31/31 tests pass.
+- Manual verification: done for everything not requiring real ElevenLabs
+  network access, which this sandbox cannot reach; **real-credential
+  audio-quality/duration verification (item 2 above) is still owed by a
+  human before this phase is fully validated.**
+- Outcome: ready to merge pending that one human-only check.
 
 ## Roadmap update
 
-Not yet applied — `specs/roadmap.md` Phase 7 status stays ⬜ until this
-validation is complete and the human has signed off.
+Phase 7 marked 🚧 (not ✅) in `specs/roadmap.md` — implementation and
+automated (mocked) validation are done, but real-credential audio
+quality/duration verification is still owed by a human before this
+phase is considered fully validated and the status flips to ✅.

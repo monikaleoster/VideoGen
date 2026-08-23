@@ -1,8 +1,12 @@
+import subprocess
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from videogen.app import app
-from videogen.pipeline import download, notes_extraction
+from videogen.pipeline import download, notes_extraction, tts
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +15,7 @@ def _reset_step_states():
 
     from videogen.pipeline.base import StepStatus
 
-    for module in (download, notes_extraction):
+    for module in (download, notes_extraction, tts):
         module.state.status = StepStatus.PENDING
         module.state.output = None
         # A fresh Event, not .clear() — Event binds to whichever event loop
@@ -19,7 +23,19 @@ def _reset_step_states():
         # function its own loop, so reusing the old Event across tests
         # deadlocks (the bound-loop check silently fails the waiting task).
         module.state.approval_event = asyncio.Event()
+    tts._current_work_dir = None
     yield
+
+
+@pytest.fixture
+def silent_mp3_bytes(tmp_path: Path) -> bytes:
+    out_path = tmp_path / "silence.mp3"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "1.0", "-q:a", "9", "-y", str(out_path)],
+        check=True,
+        capture_output=True,
+    )
+    return out_path.read_bytes()
 
 
 @pytest.fixture
@@ -107,3 +123,116 @@ async def test_index_route_lists_all_seven_steps(client):
         "Video Upload",
     ]:
         assert name in resp.text
+
+
+@pytest.mark.asyncio
+async def test_index_route_has_tts_credential_and_per_slide_fields(client):
+    async with client as ac:
+        resp = await ac.get("/")
+    assert 'data-role="api-key"' in resp.text
+    assert 'data-role="voice-id"' in resp.text
+    assert 'data-role="tts-slides"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_generate_slide_before_any_tts_run_is_409(client):
+    async with client as ac:
+        resp = await ac.post(
+            "/pipeline/tts/slide/0/generate",
+            json={"api_key": "k", "voice_id": "v", "text": "hello"},
+        )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_generate_slide_updates_only_that_slides_output(client, silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes) as mock_synth:
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            run_resp = await ac.post(
+                "/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"}
+            )
+            assert run_resp.json() == {"status": "waiting_approval"}
+
+            status_before = await ac.get("/pipeline/status")
+            before = status_before.json()["tts"]["output"]
+
+            # Regenerate slide 1 only, with a manual override text.
+            calls_before_regenerate = mock_synth.call_count
+
+            gen_resp = await ac.post(
+                "/pipeline/tts/slide/0/generate",
+                json={"api_key": "k", "voice_id": "v", "text": "Overridden text."},
+            )
+            assert gen_resp.status_code == 200
+            assert gen_resp.json()["audio_path"]
+
+            status_after = await ac.get("/pipeline/status")
+            after = status_after.json()["tts"]["output"]
+
+            # Slide 1 was actually regenerated (in place, same path — a fresh
+            # ElevenLabs call was made and overwrote the file); every other
+            # slide's entry is completely untouched.
+            mock_synth.assert_called_with("Overridden text.", "k", "v")
+            assert mock_synth.call_count == calls_before_regenerate + 1
+            assert after["audio_paths"][1:] == before["audio_paths"][1:]
+            assert after["durations_sec"][1:] == before["durations_sec"][1:]
+
+
+@pytest.mark.asyncio
+async def test_generate_slide_requires_non_empty_text(client, silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+
+            resp = await ac.post(
+                "/pipeline/tts/slide/2/generate",
+                json={"api_key": "k", "voice_id": "v", "text": "   "},
+            )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_slide_audio_before_any_tts_run_is_404(client):
+    async with client as ac:
+        resp = await ac.get("/pipeline/tts/slide/0/audio")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_slide_audio_for_skipped_slide_is_404(client, silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+
+            # Fixture's slide 3 ("Thank You") has no notes, so tts skips it.
+            resp = await ac.get("/pipeline/tts/slide/2/audio")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_slide_audio_returns_the_real_generated_mp3(client, silent_mp3_bytes):
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+
+            resp = await ac.get("/pipeline/tts/slide/0/audio")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "audio/mpeg"
+    assert resp.content == silent_mp3_bytes

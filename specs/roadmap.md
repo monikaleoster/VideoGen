@@ -87,10 +87,8 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   CLI-only exception.
 - **Validate:** generate audio for 1–2 sample notes; confirm audio quality
   and duration are as expected.
-- Status: 🚧 (implementation done, automated tests pass against a mocked
-  ElevenLabs client — no real ElevenLabs network access available in the
-  implementing sandbox; real-credential audio quality/duration check
-  still owed by a human before this phase is marked ✅)
+- Status: ✅ (real-credential audio quality/duration check completed and
+  approved by the human 2026-08-23)
 
 ## Phase 8 — Embed audio into PPTX (real)
 - Replace the mock embed step with real `python-pptx` logic: insert each

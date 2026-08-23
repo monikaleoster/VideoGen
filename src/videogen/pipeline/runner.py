@@ -36,13 +36,15 @@ class PipelineRun:
 run = PipelineRun()
 
 
-async def run_pipeline(drive_link: str) -> video_upload.VideoUploadOutput:
+async def run_pipeline(local_pptx_path: str) -> video_upload.VideoUploadOutput:
     """Run all seven steps in order, threading each step's output forward.
 
     Each step is awaited to `DONE` (i.e. its approval Event has been set and
     it has resumed) before the next step starts — no step skips ahead.
     """
-    download_output = await download.run_download(download.DownloadInput(drive_link=drive_link))
+    download_output = await download.run_download(
+        download.DownloadInput(local_pptx_path=local_pptx_path)
+    )
 
     notes_output = await notes_extraction.run_notes_extraction(
         notes_extraction.NotesExtractionInput(

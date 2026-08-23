@@ -8,6 +8,7 @@ logic lives here (that stays inside each step module, per tech-stack.md).
 
 import asyncio
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -23,13 +24,14 @@ from videogen.pipeline import (
 )
 from videogen.pipeline.base import StepState, StepStatus
 
-# No real Drive integration until Phase 4 — every step's fake input is
-# either hardcoded (download) or built from a prerequisite's stored output.
-_DEMO_DRIVE_LINK = "https://drive.google.com/demo-deck"
+# No real Drive integration — download takes a local .pptx path per
+# specs/2026-08-23-download-and-slide-images/requirements.md. The UI's
+# demo input points at the repo's checked-in sample deck fixture.
+_DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "sample_deck.pptx"
 
 
 def _download_input() -> download.DownloadInput:
-    return download.DownloadInput(drive_link=_DEMO_DRIVE_LINK)
+    return download.DownloadInput(local_pptx_path=str(_DEMO_PPTX_PATH))
 
 
 def _notes_extraction_input() -> notes_extraction.NotesExtractionInput:

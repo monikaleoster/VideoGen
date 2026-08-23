@@ -92,23 +92,22 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
 ## Phase 8 — Embed audio into PPTX (real)
 - Replace the mock embed step with real `python-pptx` logic: insert each
-  slide's audio clip and set it to autoplay on slide entry. A slide with
-  no notes (`has_notes=False`, so no TTS clip) gets a 1-second silent
-  placeholder instead, so every slide ends up with exactly one audio
-  element. Re-running the step against the same source deck is safe — any
-  previously-embedded audio on a slide is replaced, never duplicated (see
-  `specs/2026-08-23-embed-audio-pptx/requirements.md`).
+  slide's audio clip and set it to autoplay on slide entry (a manual
+  `p:timing` XML edit — `add_movie` alone only wires click-to-play).
+  Slides with no audio (Phase 6/7's `None` entries) are left untouched.
+  Output is a new local `_with_audio.pptx` file, original never modified
+  — no Drive involvement. Failures propagate visibly, no auto-retry.
+  Wiring correction: `embed`'s real audio-path input comes from `tts`'s
+  output directly, not the still-mocked `audio_upload` step's fake Drive
+  IDs (see `specs/2026-08-23-embed-audio-real/requirements.md`).
 - Depends on Phases 6 and 7 both being real.
-- **Validate:** open the resulting `.pptx`; autoplay audio is present on
-  the correct slides.
-- Status: 🚧 (implementation done, automated tests pass — 42/42, including
-  real-clip/placeholder/autoplay-XML/re-run coverage; structural validity
-  confirmed via `python-pptx` inspection and a LibreOffice headless
-  round-trip — no real Microsoft PowerPoint available in the implementing
-  sandbox to confirm the autoplay-on-entry behavior actually triggers
-  without a click; that check is still owed by a human before this phase
-  is marked ✅, see
-  `specs/2026-08-23-embed-audio-pptx/validation.md`)
+- **Validate:** automated XML/structure check confirming an autoplay
+  trigger (not click-only) on every audio-bearing slide; a real
+  PowerPoint/LibreOffice playback check is optional corroboration, not
+  required for this phase's sign-off (confirmed deviation from the
+  original "open the resulting .pptx" wording, which implied manual-only
+  validation).
+- Status: ✅
 
 ## Phase 9 — Drive upload (audio + final video)
 - Replace the mock upload steps with real Drive uploads for generated

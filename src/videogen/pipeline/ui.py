@@ -65,6 +65,11 @@ def _audio_upload_input(request_data: dict[str, Any]) -> audio_upload.AudioUploa
 
 
 def _embed_input(request_data: dict[str, Any]) -> embed.EmbedInput:
+    # embed's real audio-path input comes from tts's output directly, not
+    # audio_upload's (fake Drive IDs only) — see
+    # specs/2026-08-23-embed-audio-real/requirements.md. The prereq stays
+    # "audio_upload" below so the pipeline's declared step order (tts ->
+    # audio_upload -> embed) is unchanged.
     return embed.EmbedInput(
         local_pptx_path=download.state.output.local_pptx_path,
         audio_paths=tts.state.output.audio_paths,

@@ -35,8 +35,10 @@
   (audio clips, updated `.pptx`, final `.mp4`) back to the same folder.
 - **ElevenLabs API** (`elevenlabs` Python SDK or direct HTTP calls) for
   text-to-speech, single voice per run, driven by a user-supplied voice ID
-  and API key. Calls must respect ElevenLabs rate limits and retry on
-  transient failures.
+  and API key read from environment variables. Per the Phase 7 decision
+  (`specs/2026-08-23-audio-generation-real/requirements.md`), calls are
+  **not** retried on failure — including rate-limit (429) responses; any
+  failure is reported as a step failure rather than retried.
 
 ## Slide & media processing
 

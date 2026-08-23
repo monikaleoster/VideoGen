@@ -1,6 +1,9 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from videogen.pipeline.routes import router as notes_extraction_router
+
 app = FastAPI()
+app.include_router(notes_extraction_router)
 
 
 @app.get("/health")

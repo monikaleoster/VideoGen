@@ -74,8 +74,13 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
 ## Phase 7 — Audio generation (real, ElevenLabs)
 - Replace the mock TTS step with real ElevenLabs calls: single voice,
-  user-supplied voice ID and API key, rate-limit-aware, retry on
-  transient failure.
+  user-supplied voice ID and API key from environment variables,
+  user-configurable voice settings (stability/similarity) per run. No
+  retry on failure, including rate limits — any failure is reported, not
+  retried (confirmed deviation from the original plan; see
+  `specs/2026-08-23-audio-generation-real/requirements.md`). A slide with
+  no notes (per Phase 6's `has_notes` flag) is skipped, not sent to
+  ElevenLabs.
 - **Validate:** generate audio for 1–2 sample notes; confirm audio quality
   and duration are as expected.
 - Status: ⬜
@@ -109,7 +114,9 @@ Carried over from the PRD — resolve when the relevant phase is reached,
 not before:
 - Phase 3 (Reject behavior): fully manual re-run, or regenerate
   automatically with a note attached?
-- Phase 7 (voice settings): fixed stability/similarity settings, or
-  user-configurable per run?
-- Phase 7 (chunking): max deck size / notes length before ElevenLabs
-  input needs to be chunked?
+- ~~Phase 7 (voice settings): fixed stability/similarity settings, or
+  user-configurable per run?~~ Resolved 2026-08-23: user-configurable per
+  run (see `specs/2026-08-23-audio-generation-real/requirements.md`).
+- ~~Phase 7 (chunking): max deck size / notes length before ElevenLabs
+  input needs to be chunked?~~ Resolved 2026-08-23: no chunking for v1
+  (see `specs/2026-08-23-audio-generation-real/requirements.md`).

@@ -92,11 +92,22 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
 ## Phase 8 — Embed audio into PPTX (real)
 - Replace the mock embed step with real `python-pptx` logic: insert each
-  slide's audio clip and set it to autoplay on slide entry.
+  slide's audio clip and set it to autoplay on slide entry (a manual
+  `p:timing` XML edit — `add_movie` alone only wires click-to-play).
+  Slides with no audio (Phase 6/7's `None` entries) are left untouched.
+  Output is a new local `_with_audio.pptx` file, original never modified
+  — no Drive involvement. Failures propagate visibly, no auto-retry.
+  Wiring correction: `embed`'s real audio-path input comes from `tts`'s
+  output directly, not the still-mocked `audio_upload` step's fake Drive
+  IDs (see `specs/2026-08-23-embed-audio-real/requirements.md`).
 - Depends on Phases 6 and 7 both being real.
-- **Validate:** open the resulting `.pptx`; autoplay audio is present on
-  the correct slides.
-- Status: ⬜
+- **Validate:** automated XML/structure check confirming an autoplay
+  trigger (not click-only) on every audio-bearing slide; a real
+  PowerPoint/LibreOffice playback check is optional corroboration, not
+  required for this phase's sign-off (confirmed deviation from the
+  original "open the resulting .pptx" wording, which implied manual-only
+  validation).
+- Status: ✅
 
 ## Phase 9 — Drive upload (audio + final video)
 - Replace the mock upload steps with real Drive uploads for generated

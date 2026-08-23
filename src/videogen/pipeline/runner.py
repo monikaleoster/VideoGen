@@ -63,17 +63,20 @@ async def run_pipeline(
         )
     )
 
-    audio_upload_output = await audio_upload.run_audio_upload(
+    # audio_upload's output isn't consumed downstream — it only produces
+    # fake Drive IDs, not local paths (real Drive upload is Phase 9's
+    # concern, still deferred) — but the step still runs and gates on its
+    # own approval Event per requirements.
+    await audio_upload.run_audio_upload(
         audio_upload.AudioUploadInput(audio_paths=tts_output.audio_paths)
     )
 
-    # embed's output isn't consumed further downstream in this phase, but
-    # the step still runs and gates on its own approval Event per
-    # requirements.
+    # embed's real audio-path input comes from tts's output directly, not
+    # audio_upload's, per specs/2026-08-23-embed-audio-real/requirements.md.
     await embed.run_embed(
         embed.EmbedInput(
             local_pptx_path=download_output.local_pptx_path,
-            drive_file_ids=audio_upload_output.drive_file_ids,
+            audio_paths=tts_output.audio_paths,
         )
     )
 

@@ -74,13 +74,17 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
 ## Phase 7 — Audio generation (real, ElevenLabs)
 - Replace the mock TTS step with real ElevenLabs calls: single voice,
-  user-supplied voice ID and API key from environment variables,
-  user-configurable voice settings (stability/similarity) per run. No
-  retry on failure, including rate limits — any failure is reported, not
-  retried (confirmed deviation from the original plan; see
-  `specs/2026-08-23-audio-generation-real/requirements.md`). A slide with
-  no notes (per Phase 6's `has_notes` flag) is skipped, not sent to
-  ElevenLabs.
+  fixed stability/similarity settings (not user-configurable), voice ID
+  and API key entered per run through the approval-gate UI (in-memory
+  only, never persisted — deliberate deviation from tech-stack.md's more
+  general env-var/`.env` secrets wording, confirmed with the human; see
+  `specs/2026-08-23-audio-generation-real/requirements.md`). No retry on
+  failure, including rate limits — any failure is reported, not retried
+  (also a confirmed deviation from the original plan). A slide with no
+  notes (per Phase 6's `has_notes` flag) is skipped, not sent to
+  ElevenLabs. The CLI demo entry point (`__main__.py`, no UI) falls back
+  to `ELEVENLABS_API_KEY`/`ELEVENLABS_VOICE_ID` env vars as a narrow,
+  CLI-only exception.
 - **Validate:** generate audio for 1–2 sample notes; confirm audio quality
   and duration are as expected.
 - Status: ⬜
@@ -115,8 +119,8 @@ not before:
 - Phase 3 (Reject behavior): fully manual re-run, or regenerate
   automatically with a note attached?
 - ~~Phase 7 (voice settings): fixed stability/similarity settings, or
-  user-configurable per run?~~ Resolved 2026-08-23: user-configurable per
-  run (see `specs/2026-08-23-audio-generation-real/requirements.md`).
+  user-configurable per run?~~ Resolved 2026-08-23: fixed settings (see
+  `specs/2026-08-23-audio-generation-real/requirements.md`).
 - ~~Phase 7 (chunking): max deck size / notes length before ElevenLabs
   input needs to be chunked?~~ Resolved 2026-08-23: no chunking for v1
   (see `specs/2026-08-23-audio-generation-real/requirements.md`).

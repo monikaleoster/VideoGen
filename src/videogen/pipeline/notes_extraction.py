@@ -6,7 +6,7 @@ block/unblock mechanism.
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from videogen.pipeline.base import StepState, StepStatus
 
@@ -14,6 +14,8 @@ from videogen.pipeline.base import StepState, StepStatus
 @dataclass
 class NotesExtractionInput:
     deck_name: str
+    slide_count: int = 5
+    slide_image_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -37,8 +39,11 @@ async def run_notes_extraction(
     await asyncio.sleep(0.1)
 
     output = NotesExtractionOutput(
-        slide_count=5,
-        notes=[f"Fake notes for slide {i} of '{step_input.deck_name}'" for i in range(1, 6)],
+        slide_count=step_input.slide_count,
+        notes=[
+            f"Fake notes for slide {i} of '{step_input.deck_name}'"
+            for i in range(1, step_input.slide_count + 1)
+        ],
     )
     state.output = output
     state.status = StepStatus.WAITING_APPROVAL

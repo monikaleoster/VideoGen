@@ -32,7 +32,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 - Each step still returns fake data; each has its own approval gate.
 - **Validate:** run the full mock pipeline start to finish; confirm every
   step blocks on approval in order and none skip ahead.
-- Status: ⬜
+- Status: ✅
 
 ## Phase 3 — Approval-gate UI
 - Build the minimal server-rendered HTML/JS UI: live status via WebSocket,

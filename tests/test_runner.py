@@ -40,7 +40,12 @@ async def _approve_in_order(log: list[str]) -> None:
     every observed transition, so tests can assert ordering.
     """
     for name, state in _ALL_STATES:
-        while state.status != StepStatus.RUNNING:
+        # Poll for "left PENDING" rather than "hit RUNNING" specifically —
+        # a fast real step (e.g. notes_extraction's python-pptx parse) can
+        # move from RUNNING to WAITING_APPROVAL between two poll ticks, and
+        # a poll that only recognizes RUNNING would then spin forever
+        # waiting for a state it will never see again.
+        while state.status == StepStatus.PENDING:
             await asyncio.sleep(0.005)
         log.append(f"{name}:running")
 

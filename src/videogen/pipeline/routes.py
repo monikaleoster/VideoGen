@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
@@ -11,6 +12,8 @@ from videogen.pipeline.notes_extraction import (
 
 router = APIRouter(prefix="/steps/notes-extraction")
 
+_DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "sample_deck.pptx"
+
 
 @router.post("/run")
 async def run() -> dict[str, str]:
@@ -18,7 +21,7 @@ async def run() -> dict[str, str]:
         raise HTTPException(status_code=409, detail="Step is already running")
 
     asyncio.create_task(
-        run_notes_extraction(NotesExtractionInput(deck_name="demo-deck.pptx"))
+        run_notes_extraction(NotesExtractionInput(local_pptx_path=str(_DEMO_PPTX_PATH)))
     )
     # Wait until the step reaches WAITING_APPROVAL before responding, per
     # requirements.md: "starts the step; step runs until it reaches done,

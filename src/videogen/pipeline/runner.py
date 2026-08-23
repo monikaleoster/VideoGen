@@ -48,9 +48,7 @@ async def run_pipeline(local_pptx_path: str) -> video_upload.VideoUploadOutput:
 
     notes_output = await notes_extraction.run_notes_extraction(
         notes_extraction.NotesExtractionInput(
-            deck_name=download_output.local_pptx_path,
-            slide_count=download_output.slide_count,
-            slide_image_paths=download_output.slide_image_paths,
+            local_pptx_path=download_output.local_pptx_path,
         )
     )
 

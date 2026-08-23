@@ -35,11 +35,8 @@ def _download_input() -> download.DownloadInput:
 
 
 def _notes_extraction_input() -> notes_extraction.NotesExtractionInput:
-    d = download.state.output
     return notes_extraction.NotesExtractionInput(
-        deck_name=d.local_pptx_path,
-        slide_count=d.slide_count,
-        slide_image_paths=d.slide_image_paths,
+        local_pptx_path=download.state.output.local_pptx_path,
     )
 
 

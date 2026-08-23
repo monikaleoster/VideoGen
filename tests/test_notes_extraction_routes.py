@@ -44,8 +44,8 @@ def test_approve_then_status_is_done_with_output() -> None:
         status_response = client.get("/steps/notes-extraction/status")
         body = status_response.json()
         assert body["status"] == "done"
-        assert body["output"]["slide_count"] == 5
-        assert len(body["output"]["notes"]) == 5
+        assert body["output"]["slide_count"] == 3
+        assert len(body["output"]["notes"]) == 3
 
 
 def test_approve_before_run_returns_error() -> None:

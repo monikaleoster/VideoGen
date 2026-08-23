@@ -10,9 +10,12 @@ approval-gate UI needs something to call.
 
 import asyncio
 import logging
+from pathlib import Path
 
 from videogen.pipeline.base import StepState, StepStatus
 from videogen.pipeline.runner import run, run_pipeline
+
+_DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "sample_deck.pptx"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,7 +45,12 @@ async def _watch_and_auto_approve_in_order(delay: float) -> None:
     time in fixed order, so a later step's log lines never race ahead of an
     earlier step's `DONE` line."""
     for name, state in _STEPS:
-        await _wait_for(state, StepStatus.RUNNING)
+        # Poll for "left PENDING" rather than "hit RUNNING" specifically —
+        # a fast real step can move from RUNNING to WAITING_APPROVAL between
+        # two poll ticks, and a poll that only recognizes RUNNING would then
+        # wait forever for a state it will never see again.
+        while state.status == StepStatus.PENDING:
+            await asyncio.sleep(0.005)
         logger.info("[%s] RUNNING", name)
 
         await _wait_for(state, StepStatus.WAITING_APPROVAL)
@@ -60,7 +68,7 @@ async def main() -> None:
 
     watcher = asyncio.create_task(_watch_and_auto_approve_in_order(delay=0.2))
 
-    output = await run_pipeline(drive_link="https://drive.google.com/file/d/demo-deck/view")
+    output = await run_pipeline(local_pptx_path=str(_DEMO_PPTX_PATH))
 
     await watcher
 

@@ -70,7 +70,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 - Handle empty-notes slides by flagging them, not crashing.
 - **Validate:** run against a real `.pptx`; notes map correctly to slide
   index, including the empty-notes edge case.
-- Status: ⬜
+- Status: ✅
 
 ## Phase 7 — Audio generation (real, ElevenLabs)
 - Replace the mock TTS step with real ElevenLabs calls: single voice,

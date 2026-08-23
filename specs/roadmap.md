@@ -41,7 +41,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   mission.md non-goals).
 - **Validate:** drive the full mock pipeline from the browser; confirm
   status/detail messages render correctly and Approve/Reject both work.
-- Status: ⬜
+- Status: ✅
 
 ## Phase 4 — Drive download + PPTX → slide images
 - Implement real Google Drive auth and file download for a given Drive

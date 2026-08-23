@@ -1,9 +1,24 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from pathlib import Path
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from videogen.pipeline.routes import router as notes_extraction_router
+from videogen.pipeline.ui import STEPS as pipeline_steps
+from videogen.pipeline.ui import router as pipeline_ui_router
 
 app = FastAPI()
 app.include_router(notes_extraction_router)
+app.include_router(pipeline_ui_router)
+
+_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request) -> HTMLResponse:
+    steps = [{"name": step.name, "display_name": step.display_name} for step in pipeline_steps]
+    return _templates.TemplateResponse(request, "index.html", {"steps": steps})
 
 
 @app.get("/health")

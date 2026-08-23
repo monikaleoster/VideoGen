@@ -1,10 +1,13 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from videogen.pipeline import audio_upload, download, embed, notes_extraction, render, tts, video_upload
 from videogen.pipeline.base import StepStatus
 from videogen.pipeline.runner import run, run_pipeline
+
+SAMPLE_PPTX = str(Path(__file__).resolve().parent / "fixtures" / "sample_deck.pptx")
 
 _ALL_STATES = [
     ("download", download.state),
@@ -54,10 +57,10 @@ async def test_steps_run_in_fixed_order_and_none_skip_ahead() -> None:
     log: list[str] = []
     approver = asyncio.create_task(_approve_in_order(log))
     run_task = asyncio.create_task(
-        run_pipeline(drive_link="https://drive.google.com/file/d/demo/view")
+        run_pipeline(local_pptx_path=SAMPLE_PPTX)
     )
 
-    await asyncio.wait_for(asyncio.gather(approver, run_task), timeout=5.0)
+    await asyncio.wait_for(asyncio.gather(approver, run_task), timeout=30.0)
 
     expected_order = [
         "download",
@@ -81,9 +84,9 @@ async def test_steps_run_in_fixed_order_and_none_skip_ahead() -> None:
 async def test_chained_output_threads_through_the_pipeline() -> None:
     approver = asyncio.create_task(_approve_in_order([]))
     output = await asyncio.wait_for(
-        run_pipeline(drive_link="https://drive.google.com/file/d/demo/view"), timeout=5.0
+        run_pipeline(local_pptx_path=SAMPLE_PPTX), timeout=30.0
     )
-    await asyncio.wait_for(approver, timeout=5.0)
+    await asyncio.wait_for(approver, timeout=30.0)
 
     slide_count = download.state.output.slide_count
     assert slide_count == len(download.state.output.slide_image_paths)
@@ -100,8 +103,8 @@ async def test_chained_output_threads_through_the_pipeline() -> None:
 
 async def test_full_run_reaches_video_upload_done() -> None:
     approver = asyncio.create_task(_approve_in_order([]))
-    await asyncio.wait_for(run_pipeline(drive_link="https://drive.google.com/file/d/demo/view"), timeout=5.0)
-    await asyncio.wait_for(approver, timeout=5.0)
+    await asyncio.wait_for(run_pipeline(local_pptx_path=SAMPLE_PPTX), timeout=30.0)
+    await asyncio.wait_for(approver, timeout=30.0)
 
     assert run.video_upload.status == StepStatus.DONE
     for _, state in _ALL_STATES:

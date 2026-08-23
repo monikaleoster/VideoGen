@@ -43,15 +43,17 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   status/detail messages render correctly and Approve/Reject both work.
 - Status: ✅
 
-## Phase 4 — Drive download + PPTX → slide images
-- Implement real Google Drive auth and file download for a given Drive
-  link/filename.
-- Implement LibreOffice-headless conversion of the downloaded `.pptx` to
-  one image per slide.
+## Phase 4 — Local PPTX → slide images
+- Deviation from the original plan: instead of real Google Drive auth and
+  download, the `download` step takes a local filesystem path to an
+  already-present `.pptx` (as if it had already been downloaded). Real
+  Google Drive integration is deferred — not built in this phase.
+- Implement real LibreOffice-headless conversion of that local `.pptx` to
+  one PNG image per slide (1920x1080).
 - Swap this in for the mock "download" step only.
-- **Validate:** given a real Drive link, image count matches slide count,
-  correct order, readable resolution.
-- Status: ⬜
+- **Validate:** given a real local `.pptx` file, image count matches slide
+  count, correct order, readable resolution (1920x1080 PNGs).
+- Status: ✅
 
 ## Phase 5 — Video generation (already validated, re-validate)
 - Re-validate the existing video generation step (slide images + audio →

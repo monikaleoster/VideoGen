@@ -10,6 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install LibreOffice and Poppler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-impress poppler-utils
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:

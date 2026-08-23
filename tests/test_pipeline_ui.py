@@ -53,7 +53,7 @@ async def test_download_then_notes_extraction_run_approve_chain(client):
         status_resp = await ac.get("/pipeline/status")
         snapshot = status_resp.json()
         assert snapshot["download"]["status"] == "done"
-        assert snapshot["download"]["output"]["slide_count"] == 5
+        assert snapshot["download"]["output"]["slide_count"] == 3
 
         notes_run_resp = await ac.post("/pipeline/notes_extraction/run")
         assert notes_run_resp.json() == {"status": "waiting_approval"}

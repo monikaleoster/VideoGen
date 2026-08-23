@@ -63,17 +63,23 @@ async def run_pipeline(
         )
     )
 
-    audio_upload_output = await audio_upload.run_audio_upload(
+    # audio_upload's (still mocked) output isn't consumed by embed below —
+    # real Drive upload of the embedded deck is Phase 9 — but it still runs
+    # and gates on its own approval Event, per pipeline step ordering.
+    await audio_upload.run_audio_upload(
         audio_upload.AudioUploadInput(audio_paths=tts_output.audio_paths)
     )
 
     # embed's output isn't consumed further downstream in this phase, but
     # the step still runs and gates on its own approval Event per
-    # requirements.
+    # requirements. It embeds tts_output's local audio clips directly —
+    # audio_upload still runs first in pipeline order, but its (still
+    # mocked) Drive output isn't consumed here; real Drive upload of the
+    # embedded deck is Phase 9.
     await embed.run_embed(
         embed.EmbedInput(
             local_pptx_path=download_output.local_pptx_path,
-            drive_file_ids=audio_upload_output.drive_file_ids,
+            audio_paths=tts_output.audio_paths,
         )
     )
 

@@ -23,7 +23,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   for approval" and blocks until unblocked.
 - **Validate:** run the single stub step via a route/CLI call, confirm it
   blocks, confirm it resumes after the Event is manually set.
-- Status: ⬜
+- Status: ✅
 
 ## Phase 2 — Mock pipeline, all 7 steps
 - Extend Phase 1's pattern to stub all seven steps (download, notes

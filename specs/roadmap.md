@@ -129,6 +129,49 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   skipped approval, each step still independently re-runnable.
 - Status: ⬜
 
+## Phase 11 — Download step: configurable PPTX path & shared tmp root
+- UX/infrastructure improvement on top of Phase 4: the `download` step's
+  PPTX path and a shared tmp-root directory (used by every step's scratch
+  work dir, not just `download`) become user-supplied via two new UI
+  fields, instead of a hardcoded demo fixture path and independent
+  per-step OS temp dirs. Blank fields fall back to today's behavior. The
+  CLI demo entry point is unaffected.
+- **Validate:** custom path/tmp-root fields work end-to-end; every
+  downstream step's work dir nests under the shared root; blank fields
+  regress to nothing (identical to pre-change behavior).
+- Status: ✅ (see `specs/2026-08-23-download-input-config/`; fully
+  automatable validation bar — custom path/tmp-root, shared nesting across
+  `download`/`tts`/`embed`, and blank-fields no-regression all covered by
+  automated tests, 54/54 passing)
+
+## Phase 12 — Notes extraction: per-slide text files + UI links
+- UX improvement on top of Phase 6: each slide's extracted notes are also
+  written to their own `.txt` file (one per slide, always, including
+  empty ones), served via a new route, and linked from the approval-gate
+  UI — mirroring the existing per-slide audio link pattern from `tts`.
+- **Validate:** one file per slide, byte-for-byte matching extracted
+  text; every slide has a working UI link, including the no-notes one.
+- Status: ✅ (see `specs/2026-08-23-notes-text-files/`; fully automatable
+  validation bar — one file per slide byte-for-byte matching extracted
+  text (including the empty no-notes file), route serving at both
+  `waiting_approval` and `done`, 404s, and the UI link container all
+  covered by automated tests, 59/59 passing)
+
+## Phase 13 — TTS step: "Run" stops auto-generating audio
+- UX/cost-safety improvement on top of Phase 7: the approval-gate UI's
+  `tts` Run/Reject actions no longer call ElevenLabs — they only prepare
+  the per-slide list (text, no audio). Only "Generate All" and per-slide
+  "Generate" call ElevenLabs. The CLI demo entry point's full-pipeline
+  run is explicitly unaffected — it keeps generating audio automatically
+  end to end.
+- **Validate:** Run/Reject never call ElevenLabs; Generate All and
+  per-slide Generate unaffected; CLI demo path unaffected.
+- Status: ✅ (see `specs/2026-08-23-tts-run-no-autogenerate/`; automated
+  tests confirm Run/Reject build the per-slide list with zero ElevenLabs
+  calls, Generate All/per-slide Generate are unaffected, and the CLI demo
+  path (`run_tts`/`run_pipeline`) still auto-generates all audio end to
+  end)
+
 ## Open questions to resolve along the way
 
 Carried over from the PRD — resolve when the relevant phase is reached,

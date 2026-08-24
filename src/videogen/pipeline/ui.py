@@ -35,7 +35,13 @@ _DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "
 
 
 def _download_input(request_data: dict[str, Any]) -> download.DownloadInput:
-    return download.DownloadInput(local_pptx_path=str(_DEMO_PPTX_PATH))
+    # Per specs/2026-08-23-download-input-config/requirements.md: both
+    # fields are optional and read live from the UI, never persisted beyond
+    # the in-flight run; a blank/absent value falls back to today's
+    # behavior (the checked-in demo fixture, OS default temp dir).
+    local_pptx_path = request_data.get("local_pptx_path") or str(_DEMO_PPTX_PATH)
+    tmp_root = request_data.get("tmp_root") or None
+    return download.DownloadInput(local_pptx_path=local_pptx_path, tmp_root=tmp_root)
 
 
 def _notes_extraction_input(request_data: dict[str, Any]) -> notes_extraction.NotesExtractionInput:
@@ -44,22 +50,15 @@ def _notes_extraction_input(request_data: dict[str, Any]) -> notes_extraction.No
     )
 
 
-def _tts_input(request_data: dict[str, Any]) -> tts.TtsInput:
-    # Per-run credentials only — entered through the UI, held in memory for
-    # this request only, never persisted (per
-    # specs/2026-08-23-audio-generation-real/requirements.md).
-    api_key = request_data.get("api_key")
-    voice_id = request_data.get("voice_id")
-    if not api_key or not voice_id:
-        raise HTTPException(
-            status_code=422,
-            detail="'api_key' and 'voice_id' are both required to run the tts step",
-        )
-    return tts.TtsInput(
+def _tts_prepare_input(request_data: dict[str, Any]) -> tts.TtsPrepareInput:
+    # Per specs/2026-08-23-tts-run-no-autogenerate/requirements.md: Run/
+    # Reject on the tts step only prepares the per-slide list (text, no
+    # audio) — no ElevenLabs call, so no api_key/voice_id needed here. The
+    # per-slide `/pipeline/tts/slide/{index}/generate` route (below) keeps
+    # its own credential requirement unchanged.
+    return tts.TtsPrepareInput(
         notes=notes_extraction.state.output.notes,
         has_notes=notes_extraction.state.output.has_notes,
-        api_key=api_key,
-        voice_id=voice_id,
     )
 
 
@@ -118,7 +117,9 @@ STEPS: list[_StepEntry] = [
         _notes_extraction_input,
         "download",
     ),
-    _StepEntry("tts", "Text-to-Speech", tts.run_tts, tts.state, _tts_input, "notes_extraction"),
+    _StepEntry(
+        "tts", "Text-to-Speech", tts.prepare_tts, tts.state, _tts_prepare_input, "notes_extraction"
+    ),
     _StepEntry(
         "audio_upload",
         "Audio Upload",
@@ -241,19 +242,13 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
             detail=f"Step '{step_name}' is not waiting for approval (status={step.state.status.value})",
         )
 
-    logger.info("UI: reject '%s' (re-running)", step_name)
+    # Clear the stale WAITING_APPROVAL before starting the fresh run so
+    # `_await_step_settled` can't mistake the old status for the new run
+    # having already settled — a real risk once a run_fn (like
+    # `tts.prepare_tts`) can reach WAITING_APPROVAL synchronously, before
+    # this coroutine gets a chance to observe the transition.
+    step.state.status = StepStatus.PENDING
     task = asyncio.create_task(step.run_fn(step.build_input(request_data or {})))
-    # Wait for the fresh run to actually start (status flips away from the
-    # stale WAITING_APPROVAL) before waiting for it to settle again —
-    # otherwise we'd see the old status and return immediately.
-    while step.state.status == StepStatus.WAITING_APPROVAL:
-        if task.done() and task.exception() is not None:
-            exc = task.exception()
-            logger.warning("Step '%s' failed on reject-rerun: %s", step_name, exc)
-            step.state.status = StepStatus.PENDING
-            step.state.output = None
-            raise HTTPException(status_code=502, detail=f"Step '{step_name}' failed: {exc}")
-        await asyncio.sleep(0.01)
     await _await_step_settled(step, task)
     return {"status": step.state.status.value}
 
@@ -261,10 +256,10 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
 @router.post("/pipeline/tts/slide/{index}/generate")
 async def generate_tts_slide(index: int, request_data: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Regenerate a single slide's audio in place, independent of the rest
-    of the tts step's output — for the per-slide "Generate" button. Also
-    backs the "Generate All" flow's per-slide entries when a slide's text
-    override differs from the notes_extraction text (the whole-step
-    Run/Reject path is used when no per-slide overrides are needed)."""
+    of the tts step's output — for the per-slide "Generate" button, and
+    (per specs/2026-08-23-tts-run-no-autogenerate/requirements.md) called
+    sequentially once per slide by "Generate All" as well, since the tts
+    step's Run/Reject no longer generates any audio itself."""
     if tts.state.output is None:
         raise HTTPException(
             status_code=409,
@@ -311,6 +306,23 @@ async def get_tts_slide_audio(index: int) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"No audio generated yet for slide {index}")
 
     return FileResponse(audio_path, media_type="audio/mpeg")
+
+
+@router.get("/pipeline/notes_extraction/slide/{index}/notes")
+async def get_notes_extraction_slide_notes(index: int) -> FileResponse:
+    """Serve a slide's extracted notes as plain text so it can be linked/
+    downloaded directly from the UI instead of the human having to locate
+    the file on disk."""
+    if notes_extraction.state.output is None or not (
+        0 <= index < len(notes_extraction.state.output.notes_file_paths)
+    ):
+        raise HTTPException(status_code=404, detail=f"No notes for slide {index}")
+
+    notes_path = notes_extraction.state.output.notes_file_paths[index]
+    if not Path(notes_path).exists():
+        raise HTTPException(status_code=404, detail=f"No notes file generated yet for slide {index}")
+
+    return FileResponse(notes_path, media_type="text/plain")
 
 
 @router.websocket("/ws/pipeline-status")

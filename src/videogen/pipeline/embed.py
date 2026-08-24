@@ -18,14 +18,14 @@ determined.
 """
 
 import asyncio
-import logging
-import tempfile
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from pptx import Presentation
 from pptx.util import Emu
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
 
 logger = logging.getLogger(__name__)
@@ -121,3 +121,30 @@ async def run_embed(step_input: EmbedInput) -> EmbedOutput:
 
     state.status = StepStatus.DONE
     return output
+
+
+def _embed_all(step_input: EmbedInput) -> EmbedOutput:
+    work_dir = workdir.make_work_dir(prefix="videogen_embed_")
+    silence_path = work_dir / "silence.mp3"
+    _generate_silence(silence_path)
+
+    prs = Presentation(step_input.local_pptx_path)
+
+    slides_embedded: list[bool] = []
+    used_placeholder: list[bool] = []
+    for slide, audio_path in zip(prs.slides, step_input.audio_paths, strict=True):
+        is_placeholder = audio_path is None
+        clip_path = str(silence_path) if is_placeholder else audio_path
+        _embed_clip(slide, clip_path)
+        slides_embedded.append(True)
+        used_placeholder.append(is_placeholder)
+
+    base_path = step_input.local_pptx_path.removesuffix(".pptx")
+    updated_pptx_path = f"{base_path}_with_audio.pptx"
+    prs.save(updated_pptx_path)
+
+    return EmbedOutput(
+        updated_pptx_path=updated_pptx_path,
+        slides_embedded=slides_embedded,
+        used_placeholder=used_placeholder,
+    )

@@ -10,13 +10,13 @@ retried — the human re-runs manually via the existing Reject action.
 import asyncio
 import logging
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from elevenlabs.client import ElevenLabs
 from elevenlabs.types.voice_settings import VoiceSettings
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,16 @@ class TtsInput:
     has_notes: list[bool]
     api_key: str
     voice_id: str
+
+
+@dataclass
+class TtsPrepareInput:
+    """Slimmer input for `prepare_tts` — no ElevenLabs credentials needed to
+    build the empty per-slide list. Per
+    specs/2026-08-23-tts-run-no-autogenerate/requirements.md."""
+
+    notes: list[str]
+    has_notes: list[bool]
 
 
 @dataclass
@@ -110,13 +120,7 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
     state.output = None
     state.approval_event.clear()
 
-    slide_count = len(step_input.notes)
-    logger.info(
-        "tts starting: %d slide(s), %d with notes, voice_id=%s",
-        slide_count, sum(step_input.has_notes), step_input.voice_id,
-    )
-
-    work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
+    work_dir = workdir.make_work_dir(prefix="videogen_tts_")
     _current_work_dir = work_dir
 
     audio_paths: list[str | None] = []
@@ -152,6 +156,27 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
     return output
 
 
+async def prepare_tts(step_input: TtsPrepareInput) -> TtsOutput:
+    """Run/Reject path for the approval-gate UI: builds the per-slide list
+    (text-only, no audio yet) without calling ElevenLabs, and blocks on
+    `state.approval_event` like every other step. Per
+    specs/2026-08-23-tts-run-no-autogenerate/requirements.md — `run_tts`
+    above is left completely unchanged for the CLI demo path."""
+    state.status = StepStatus.RUNNING
+    state.output = None
+    state.approval_event.clear()
+
+    n = len(step_input.notes)
+    output = TtsOutput(audio_paths=[None] * n, durations_sec=[None] * n)
+    state.output = output
+    state.status = StepStatus.WAITING_APPROVAL
+
+    await state.approval_event.wait()
+
+    state.status = StepStatus.DONE
+    return output
+
+
 async def regenerate_slide(index: int, text: str, api_key: str, voice_id: str) -> tuple[str, float]:
     """Regenerate a single slide's audio in place, independent of the rest
     of the step's output — a manual per-slide "Generate" action, not part
@@ -160,7 +185,7 @@ async def regenerate_slide(index: int, text: str, api_key: str, voice_id: str) -
     global _current_work_dir
 
     if _current_work_dir is None:
-        _current_work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
+        _current_work_dir = workdir.make_work_dir(prefix="videogen_tts_")
 
     logger.info("Regenerating slide %d (index %d) on demand", index + 1, index)
     out_path = _current_work_dir / f"slide_{index + 1:02d}.mp3"

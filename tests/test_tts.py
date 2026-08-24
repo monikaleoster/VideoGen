@@ -6,8 +6,9 @@ from unittest.mock import patch
 import pytest
 
 from videogen.pipeline import tts as tts_module
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepStatus
-from videogen.pipeline.tts import TtsInput, regenerate_slide, run_tts, state
+from videogen.pipeline.tts import TtsInput, TtsPrepareInput, prepare_tts, regenerate_slide, run_tts, state
 
 
 @pytest.fixture(autouse=True)
@@ -16,11 +17,13 @@ def reset_state():
     state.output = None
     state.approval_event = asyncio.Event()
     tts_module._current_work_dir = None
+    workdir.set_tmp_root(None)
     yield
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
     tts_module._current_work_dir = None
+    workdir.set_tmp_root(None)
 
 
 @pytest.fixture
@@ -157,6 +160,75 @@ async def test_step_blocks_until_approved(silent_mp3_bytes) -> None:
             await task
         except asyncio.CancelledError:
             pass
+
+
+async def test_work_dir_nests_under_shared_tmp_root_when_set(tmp_path: Path, silent_mp3_bytes) -> None:
+    custom_root = tmp_path / "shared_root"
+    workdir.set_tmp_root(str(custom_root))
+
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        task = asyncio.create_task(
+            run_tts(
+                TtsInput(
+                    notes=["Hello."],
+                    has_notes=[True],
+                    api_key="fake-key",
+                    voice_id="fake-voice",
+                )
+            )
+        )
+        await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
+        state.approval_event.set()
+        output = await asyncio.wait_for(task, timeout=10.0)
+
+    work_dir = Path(output.audio_paths[0]).parent
+    assert work_dir.parent == custom_root
+    assert work_dir.name.startswith("videogen_tts_")
+
+
+async def test_prepare_tts_builds_all_none_output_no_api_calls() -> None:
+    """Per specs/2026-08-23-tts-run-no-autogenerate: prepare_tts never
+    touches ElevenLabs — it only builds the per-slide text list."""
+    with patch("videogen.pipeline.tts._synthesize") as mock_synth:
+        task = asyncio.create_task(
+            prepare_tts(
+                TtsPrepareInput(
+                    notes=["Slide one.", "", "Slide three."],
+                    has_notes=[True, False, True],
+                )
+            )
+        )
+        await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
+        assert state.output.audio_paths == [None, None, None]
+        assert state.output.durations_sec == [None, None, None]
+
+        state.approval_event.set()
+        output = await asyncio.wait_for(task, timeout=10.0)
+
+    mock_synth.assert_not_called()
+    assert output.audio_paths == [None, None, None]
+    assert output.durations_sec == [None, None, None]
+    assert state.status == StepStatus.DONE
+
+
+async def test_prepare_tts_blocks_until_approved() -> None:
+    with patch("videogen.pipeline.tts._synthesize") as mock_synth:
+        task = asyncio.create_task(
+            prepare_tts(TtsPrepareInput(notes=["Hello."], has_notes=[True]))
+        )
+        await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
+        assert state.status == StepStatus.WAITING_APPROVAL
+
+        await asyncio.sleep(0.05)
+        assert not task.done()
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    mock_synth.assert_not_called()
 
 
 async def _wait_for_status(target: StepStatus) -> None:

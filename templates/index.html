@@ -27,12 +27,21 @@
       <span class="status status-pending" data-role="status">pending</span>
     </div>
     <pre data-role="output" hidden></pre>
+    {% if step.name == "download" %}
+    <div data-role="download-config" style="margin-bottom: 0.5rem;">
+      <input type="text" data-role="pptx-path" placeholder="PPT file path (blank = demo fixture)" autocomplete="off" style="width: 45%;">
+      <input type="text" data-role="tmp-root" placeholder="Tmp folder (blank = OS default)" autocomplete="off" style="width: 45%;">
+    </div>
+    {% endif %}
     {% if step.name == "tts" %}
     <div data-role="credentials" style="margin-bottom: 0.5rem;">
       <input type="password" data-role="api-key" placeholder="ElevenLabs API key" autocomplete="off">
       <input type="text" data-role="voice-id" placeholder="ElevenLabs voice ID" autocomplete="off">
     </div>
     <div data-role="tts-slides"></div>
+    {% endif %}
+    {% if step.name == "notes_extraction" %}
+    <div data-role="notes-slides"></div>
     {% endif %}
     <div data-role="actions"></div>
   </div>
@@ -41,9 +50,10 @@
 
 <script>
 // The tts step's API key / voice ID fields are read live from the DOM at
-// Run/Reject time and never written to localStorage, cookies, or any
-// server-side file — they exist only in this page's in-memory state for
-// the run being submitted (per specs/2026-08-23-audio-generation-real).
+// Generate/Generate All time (the only actions that call ElevenLabs, per
+// specs/2026-08-23-tts-run-no-autogenerate) and never written to
+// localStorage, cookies, or any server-side file — they exist only in this
+// page's in-memory state for the request being submitted.
 function render(snapshot) {
   for (const [name, step] of Object.entries(snapshot)) {
     const row = document.querySelector(`.step[data-step="${name}"]`);
@@ -73,6 +83,41 @@ function render(snapshot) {
     if (name === "tts") {
       renderTtsSlides(row, step, snapshot.notes_extraction);
     }
+    if (name === "notes_extraction") {
+      renderNotesSlides(row, step);
+    }
+  }
+}
+
+// Rebuilds the per-slide link list only when the number of slides changes
+// (a fresh run), mirroring renderTtsSlides but simpler — just a link per
+// slide, no text input or Generate button.
+function renderNotesSlides(row, notesStep) {
+  const container = row.querySelector('[data-role="notes-slides"]');
+  const hasNotes = notesStep.output?.has_notes ?? [];
+
+  if (hasNotes.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  if (container.dataset.slideCount !== String(hasNotes.length)) {
+    container.innerHTML = "";
+    container.dataset.slideCount = String(hasNotes.length);
+
+    hasNotes.forEach((slideHasNotes, i) => {
+      const slideRow = document.createElement("div");
+      slideRow.dataset.slideIndex = String(i);
+      slideRow.style.marginBottom = "0.25rem";
+
+      const link = document.createElement("a");
+      link.href = `/pipeline/notes_extraction/slide/${i}/notes`;
+      link.target = "_blank";
+      link.textContent = `Slide ${i + 1} notes${slideHasNotes ? "" : " (no notes)"}`;
+
+      slideRow.appendChild(link);
+      container.appendChild(slideRow);
+    });
   }
 }
 
@@ -96,9 +141,7 @@ function renderTtsSlides(row, ttsStep, notesStep) {
     container.innerHTML = "";
     container.dataset.slideCount = String(audioPaths.length);
 
-    const generateAllBtn = makeButton("Generate All", () =>
-      postAction("tts", ttsStep.status === "pending" ? "run" : "reject")
-    );
+    const generateAllBtn = makeButton("Generate All", () => generateAllSlides(row));
     generateAllBtn.style.marginBottom = "0.5rem";
     container.appendChild(generateAllBtn);
 
@@ -161,6 +204,23 @@ function renderTtsSlides(row, ttsStep, notesStep) {
   });
 }
 
+// "Generate All": sequentially hits the same per-slide endpoint each row's
+// own "Generate" button uses, in index order, awaiting each before moving
+// to the next (no concurrent burst against ElevenLabs). Per
+// specs/2026-08-23-tts-run-no-autogenerate/requirements.md, this button no
+// longer calls the tts step's Run/Reject action. Blank text boxes are
+// skipped, mirroring the per-slide route's own reject-blank-text behavior.
+async function generateAllSlides(ttsRow) {
+  const container = ttsRow.querySelector('[data-role="tts-slides"]');
+  const slideRows = container.querySelectorAll("[data-slide-index]");
+  for (const slideRow of slideRows) {
+    const index = Number(slideRow.dataset.slideIndex);
+    const text = slideRow.querySelector('[data-role="slide-text"]')?.value ?? "";
+    if (!text.trim()) continue;
+    await generateSlide(ttsRow, index);
+  }
+}
+
 async function generateSlide(ttsRow, index) {
   const creds = ttsCredentials(ttsRow);
   const text = ttsRow.querySelector(
@@ -187,9 +247,19 @@ function ttsCredentials(row) {
   };
 }
 
+// Mirrors ttsCredentials: read live from the DOM at Run/Reject time, never
+// persisted beyond the in-flight request (per
+// specs/2026-08-23-download-input-config).
+function downloadConfig(row) {
+  return {
+    local_pptx_path: row.querySelector('[data-role="pptx-path"]')?.value ?? "",
+    tmp_root: row.querySelector('[data-role="tmp-root"]')?.value ?? "",
+  };
+}
+
 async function postAction(step, action) {
   const row = document.querySelector(`.step[data-step="${step}"]`);
-  const body = step === "tts" ? ttsCredentials(row) : {};
+  const body = step === "tts" ? ttsCredentials(row) : step === "download" ? downloadConfig(row) : {};
   await fetch(`/pipeline/${step}/${action}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

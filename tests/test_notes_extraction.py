@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepStatus
 from videogen.pipeline.notes_extraction import (
     NotesExtractionInput,
@@ -67,6 +68,29 @@ async def test_step_resumes_and_completes_after_approval() -> None:
         "",
     ]
     assert output.has_notes == [True, True, False]
+
+    # One .txt file per slide, always — including the empty-notes slide —
+    # each byte-for-byte matching that slide's `notes[i]` value.
+    assert len(output.notes_file_paths) == 3
+    for path, expected_text in zip(output.notes_file_paths, output.notes, strict=True):
+        assert Path(path).read_text() == expected_text
+    assert Path(output.notes_file_paths[2]).read_bytes() == b""
+
+
+async def test_notes_files_nest_under_shared_tmp_root(tmp_path: Path) -> None:
+    workdir.set_tmp_root(str(tmp_path))
+    try:
+        task = asyncio.create_task(
+            run_notes_extraction(NotesExtractionInput(local_pptx_path=SAMPLE_PPTX))
+        )
+        await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
+        state.approval_event.set()
+        output = await asyncio.wait_for(task, timeout=5.0)
+
+        for path in output.notes_file_paths:
+            assert Path(path).parent.parent == tmp_path
+    finally:
+        workdir.set_tmp_root(None)
 
 
 async def _wait_for_status(target: StepStatus) -> None:

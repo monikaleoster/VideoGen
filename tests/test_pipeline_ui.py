@@ -6,7 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from videogen.app import app
-from videogen.pipeline import download, notes_extraction, tts
+from videogen.pipeline import download, embed, notes_extraction, tts, workdir
 
 
 @pytest.fixture(autouse=True)
@@ -15,7 +15,7 @@ def _reset_step_states():
 
     from videogen.pipeline.base import StepStatus
 
-    for module in (download, notes_extraction, tts):
+    for module in (download, notes_extraction, tts, embed):
         module.state.status = StepStatus.PENDING
         module.state.output = None
         # A fresh Event, not .clear() — Event binds to whichever event loop
@@ -24,7 +24,9 @@ def _reset_step_states():
         # deadlocks (the bound-loop check silently fails the waiting task).
         module.state.approval_event = asyncio.Event()
     tts._current_work_dir = None
+    workdir.set_tmp_root(None)
     yield
+    workdir.set_tmp_root(None)
 
 
 @pytest.fixture
@@ -230,9 +232,235 @@ async def test_get_slide_audio_returns_the_real_generated_mp3(client, silent_mp3
             await ac.post("/pipeline/download/approve")
             await ac.post("/pipeline/notes_extraction/run")
             await ac.post("/pipeline/notes_extraction/approve")
-            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+            await ac.post("/pipeline/tts/run")
+            await ac.post(
+                "/pipeline/tts/slide/0/generate",
+                json={"api_key": "k", "voice_id": "v", "text": "Hello slide one."},
+            )
 
             resp = await ac.get("/pipeline/tts/slide/0/audio")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "audio/mpeg"
     assert resp.content == silent_mp3_bytes
+
+
+@pytest.mark.asyncio
+async def test_index_route_has_download_config_fields(client):
+    async with client as ac:
+        resp = await ac.get("/")
+    assert 'data-role="pptx-path"' in resp.text
+    assert 'data-role="tmp-root"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_download_with_blank_fields_uses_demo_fixture_no_regression(client):
+    async with client as ac:
+        run_resp = await ac.post("/pipeline/download/run", json={"local_pptx_path": "", "tmp_root": ""})
+        assert run_resp.json() == {"status": "waiting_approval"}
+
+    demo_fixture = Path(__file__).resolve().parent / "fixtures" / "sample_deck.pptx"
+    output = download.state.output
+    assert Path(output.local_pptx_path).name == demo_fixture.name
+    # No custom root was supplied, so the work dir must not be nested under
+    # any caller-chosen directory — it lands straight in the OS temp dir.
+    import tempfile
+
+    assert Path(output.local_pptx_path).parent.parent == Path(tempfile.gettempdir())
+
+
+@pytest.mark.asyncio
+async def test_download_with_custom_pptx_path_converts_that_file_not_the_demo(client, tmp_path: Path):
+    demo_fixture = Path(__file__).resolve().parent / "fixtures" / "sample_deck.pptx"
+    custom_pptx = tmp_path / "my_custom_deck.pptx"
+    custom_pptx.write_bytes(demo_fixture.read_bytes())
+
+    async with client as ac:
+        run_resp = await ac.post("/pipeline/download/run", json={"local_pptx_path": str(custom_pptx)})
+        assert run_resp.json() == {"status": "waiting_approval"}
+
+    output = download.state.output
+    assert Path(output.local_pptx_path).name == "my_custom_deck.pptx"
+
+
+@pytest.mark.asyncio
+async def test_index_route_has_notes_slides_container(client):
+    async with client as ac:
+        resp = await ac.get("/")
+    assert 'data-role="notes-slides"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_get_notes_slide_before_any_run_is_404(client):
+    async with client as ac:
+        resp = await ac.get("/pipeline/notes_extraction/slide/0/notes")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_notes_slide_out_of_range_is_404(client):
+    async with client as ac:
+        await ac.post("/pipeline/download/run")
+        await ac.post("/pipeline/download/approve")
+        await ac.post("/pipeline/notes_extraction/run")
+
+        resp = await ac.get("/pipeline/notes_extraction/slide/99/notes")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_notes_slide_served_at_waiting_approval_and_done(client):
+    async with client as ac:
+        await ac.post("/pipeline/download/run")
+        await ac.post("/pipeline/download/approve")
+        run_resp = await ac.post("/pipeline/notes_extraction/run")
+        assert run_resp.json() == {"status": "waiting_approval"}
+
+        status_resp = await ac.get("/pipeline/status")
+        notes = status_resp.json()["notes_extraction"]["output"]["notes"]
+
+        # Served correctly while still waiting_approval...
+        resp_waiting = await ac.get("/pipeline/notes_extraction/slide/0/notes")
+        assert resp_waiting.status_code == 200
+        assert resp_waiting.headers["content-type"].startswith("text/plain")
+        assert resp_waiting.text == notes[0]
+
+        # The no-notes slide serves an empty body, not a 404.
+        resp_empty = await ac.get("/pipeline/notes_extraction/slide/2/notes")
+        assert resp_empty.status_code == 200
+        assert resp_empty.text == ""
+
+        # ...and again after approval (status flips to done).
+        approve_resp = await ac.post("/pipeline/notes_extraction/approve")
+        assert approve_resp.json() == {"status": "done"}
+
+        resp_done = await ac.get("/pipeline/notes_extraction/slide/1/notes")
+        assert resp_done.status_code == 200
+        assert resp_done.text == notes[1]
+
+
+@pytest.mark.asyncio
+async def test_tts_run_prepares_slides_with_no_audio_and_no_elevenlabs_call(client):
+    """Per specs/2026-08-23-tts-run-no-autogenerate: Run on tts populates
+    per-slide rows (text, no audio) and reaches waiting_approval without
+    ever calling ElevenLabs — and no api_key/voice_id is required."""
+    with patch("videogen.pipeline.tts._synthesize") as mock_synth:
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            run_resp = await ac.post("/pipeline/tts/run")
+            assert run_resp.json() == {"status": "waiting_approval"}
+
+            status_resp = await ac.get("/pipeline/status")
+            tts_output = status_resp.json()["tts"]["output"]
+
+    mock_synth.assert_not_called()
+    assert tts_output["audio_paths"] == [None, None, None]
+    assert tts_output["durations_sec"] == [None, None, None]
+
+
+@pytest.mark.asyncio
+async def test_tts_reject_reprepares_without_calling_elevenlabs(client):
+    with patch("videogen.pipeline.tts._synthesize") as mock_synth:
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            await ac.post("/pipeline/tts/run")
+
+            reject_resp = await ac.post("/pipeline/tts/reject")
+            assert reject_resp.json() == {"status": "waiting_approval"}
+
+            status_resp = await ac.get("/pipeline/status")
+            tts_output = status_resp.json()["tts"]["output"]
+
+    mock_synth.assert_not_called()
+    assert tts_output["audio_paths"] == [None, None, None]
+    assert tts_output["durations_sec"] == [None, None, None]
+
+
+@pytest.mark.asyncio
+async def test_generate_all_flow_generates_audio_for_every_non_blank_slide_in_order(client, silent_mp3_bytes):
+    """Mirrors what the "Generate All" button now does (per
+    specs/2026-08-23-tts-run-no-autogenerate): sequentially call the
+    per-slide generate route for every slide row, skipping blank text,
+    same end result as today's full-run behavior."""
+    call_order: list[int] = []
+
+    def fake_synth(text: str, api_key: str, voice_id: str) -> bytes:
+        call_order.append(int(voice_id.split("-")[-1]))
+        return silent_mp3_bytes
+
+    with patch("videogen.pipeline.tts._synthesize", side_effect=fake_synth):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run")
+
+            status_resp = await ac.get("/pipeline/status")
+            notes = status_resp.json()["notes_extraction"]["output"]["notes"]
+
+            # Fixture's slide 3 has no notes (blank text) and is skipped,
+            # mirroring the UI's blank-text-box skip.
+            for i, text in enumerate(notes):
+                if not text.strip():
+                    continue
+                resp = await ac.post(
+                    "/pipeline/tts/slide/{}/generate".format(i),
+                    json={"api_key": "k", "voice_id": f"v-{i}", "text": text},
+                )
+                assert resp.status_code == 200
+
+            final_status = await ac.get("/pipeline/status")
+            tts_output = final_status.json()["tts"]["output"]
+
+    assert call_order == [0, 1]
+    assert tts_output["audio_paths"][0] is not None
+    assert tts_output["audio_paths"][1] is not None
+    assert tts_output["audio_paths"][2] is None
+    assert tts_output["durations_sec"][2] is None
+
+
+@pytest.mark.asyncio
+async def test_custom_tmp_root_shared_across_download_tts_and_embed(client, tmp_path: Path, silent_mp3_bytes):
+    custom_root = tmp_path / "shared_run_root"
+
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            run_resp = await ac.post("/pipeline/download/run", json={"tmp_root": str(custom_root)})
+            assert run_resp.json() == {"status": "waiting_approval"}
+            await ac.post("/pipeline/download/approve")
+
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            await ac.post("/pipeline/tts/run")
+            # Run/Reject no longer generates any audio itself, so generate
+            # slide 0's audio directly to get a real tts work dir to assert
+            # on (per specs/2026-08-23-tts-run-no-autogenerate).
+            await ac.post(
+                "/pipeline/tts/slide/0/generate",
+                json={"api_key": "k", "voice_id": "v", "text": "Hello slide one."},
+            )
+            await ac.post("/pipeline/tts/approve")
+
+            await ac.post("/pipeline/audio_upload/run")
+            await ac.post("/pipeline/audio_upload/approve")
+
+            await ac.post("/pipeline/embed/run")
+            await ac.post("/pipeline/embed/approve")
+
+    download_work_dir = Path(download.state.output.local_pptx_path).parent
+    assert download_work_dir.parent == custom_root
+
+    tts_work_dir = Path(tts.state.output.audio_paths[0]).parent
+    assert tts_work_dir.parent == custom_root
+
+    embed_dirs = list(custom_root.glob("videogen_embed_*"))
+    assert len(embed_dirs) == 1

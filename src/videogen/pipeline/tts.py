@@ -120,6 +120,12 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
     state.output = None
     state.approval_event.clear()
 
+    slide_count = len(step_input.notes)
+    logger.info(
+        "tts starting: %d slide(s), %d with notes, voice_id=%s",
+        slide_count, sum(step_input.has_notes), step_input.voice_id,
+    )
+
     work_dir = workdir.make_work_dir(prefix="videogen_tts_")
     _current_work_dir = work_dir
 

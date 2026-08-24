@@ -18,7 +18,7 @@ determined.
 """
 
 import asyncio
-import subprocess
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,7 +92,10 @@ def _embed_audio(pptx_path: str, audio_paths: list[str | None], out_path: Path) 
         slides_embedded.append(True)
 
     presentation.save(str(out_path))
-    logger.info("Embedded audio into %d/%d slide(s), saved to %s", sum(slides_embedded), len(slides_embedded), out_path)
+    logger.info(
+        "Embedded audio into %d/%d slide(s), saved to %s",
+        sum(slides_embedded), len(slides_embedded), out_path,
+    )
     return slides_embedded
 
 
@@ -104,7 +107,7 @@ async def run_embed(step_input: EmbedInput) -> EmbedOutput:
     logger.info("embed starting: local_pptx_path=%s", step_input.local_pptx_path)
 
     source_path = Path(step_input.local_pptx_path)
-    work_dir = Path(tempfile.mkdtemp(prefix="videogen_embed_"))
+    work_dir = workdir.make_work_dir(prefix="videogen_embed_")
     out_path = work_dir / f"{source_path.stem}_with_audio.pptx"
 
     # python-pptx/lxml work is blocking — run it off the event loop thread
@@ -121,30 +124,3 @@ async def run_embed(step_input: EmbedInput) -> EmbedOutput:
 
     state.status = StepStatus.DONE
     return output
-
-
-def _embed_all(step_input: EmbedInput) -> EmbedOutput:
-    work_dir = workdir.make_work_dir(prefix="videogen_embed_")
-    silence_path = work_dir / "silence.mp3"
-    _generate_silence(silence_path)
-
-    prs = Presentation(step_input.local_pptx_path)
-
-    slides_embedded: list[bool] = []
-    used_placeholder: list[bool] = []
-    for slide, audio_path in zip(prs.slides, step_input.audio_paths, strict=True):
-        is_placeholder = audio_path is None
-        clip_path = str(silence_path) if is_placeholder else audio_path
-        _embed_clip(slide, clip_path)
-        slides_embedded.append(True)
-        used_placeholder.append(is_placeholder)
-
-    base_path = step_input.local_pptx_path.removesuffix(".pptx")
-    updated_pptx_path = f"{base_path}_with_audio.pptx"
-    prs.save(updated_pptx_path)
-
-    return EmbedOutput(
-        updated_pptx_path=updated_pptx_path,
-        slides_embedded=slides_embedded,
-        used_placeholder=used_placeholder,
-    )

@@ -12,7 +12,6 @@ the result is still Phase 9 — this step only reads/writes local files.
 
 import asyncio
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from pptx.oxml import parse_xml
 from pptx.oxml.ns import nsdecls, qn
 from pptx.util import Emu
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
 
 _SILENCE_DURATION_SEC = 1.0
@@ -165,7 +165,7 @@ async def run_embed(step_input: EmbedInput) -> EmbedOutput:
 
 
 def _embed_all(step_input: EmbedInput) -> EmbedOutput:
-    work_dir = Path(tempfile.mkdtemp(prefix="videogen_embed_"))
+    work_dir = workdir.make_work_dir(prefix="videogen_embed_")
     silence_path = work_dir / "silence.mp3"
     _generate_silence(silence_path)
 

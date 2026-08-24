@@ -137,7 +137,10 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 - **Validate:** custom path/tmp-root fields work end-to-end; every
   downstream step's work dir nests under the shared root; blank fields
   regress to nothing (identical to pre-change behavior).
-- Status: ⬜ (see `specs/2026-08-23-download-input-config/`)
+- Status: ✅ (see `specs/2026-08-23-download-input-config/`; fully
+  automatable validation bar — custom path/tmp-root, shared nesting across
+  `download`/`tts`/`embed`, and blank-fields no-regression all covered by
+  automated tests, 54/54 passing)
 
 ## Phase 12 — Notes extraction: per-slide text files + UI links
 - UX improvement on top of Phase 6: each slide's extracted notes are also

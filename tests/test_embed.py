@@ -6,6 +6,7 @@ import pytest
 from pptx import Presentation
 from pptx.oxml.ns import qn
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepStatus
 from videogen.pipeline.embed import EmbedInput, run_embed, state
 
@@ -15,10 +16,12 @@ def reset_state():
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
+    workdir.set_tmp_root(None)
     yield
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
+    workdir.set_tmp_root(None)
 
 
 @pytest.fixture
@@ -135,6 +138,25 @@ async def test_rerunning_the_step_does_not_duplicate_audio(deck_path: str, real_
     prs = Presentation(output2.updated_pptx_path)
     for slide in prs.slides:
         assert len(_audio_shapes(slide)) == 1
+
+
+async def test_work_dir_nests_under_shared_tmp_root_when_set(
+    tmp_path: Path, deck_path: str, real_clip: str
+) -> None:
+    custom_root = tmp_path / "shared_root"
+    workdir.set_tmp_root(str(custom_root))
+
+    task = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
+    state.approval_event.set()
+    await asyncio.wait_for(task, timeout=5.0)
+
+    # embed's own work dir (holding the generated silence.mp3) isn't
+    # surfaced in its output, so confirm nesting by inspecting the root
+    # directly: exactly one videogen_embed_* dir was created under it.
+    embed_dirs = list(custom_root.glob("videogen_embed_*"))
+    assert len(embed_dirs) == 1
+    assert (embed_dirs[0] / "silence.mp3").exists()
 
 
 async def _wait_for_status(target: StepStatus) -> None:

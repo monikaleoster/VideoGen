@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepStatus
 from videogen.pipeline.download import DownloadInput, run_download, state
 
@@ -14,10 +15,12 @@ def reset_state():
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
+    workdir.set_tmp_root(None)
     yield
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
+    workdir.set_tmp_root(None)
 
 
 async def test_step_blocks_until_approved() -> None:
@@ -63,6 +66,25 @@ async def test_step_resumes_and_completes_after_approval() -> None:
         assert header[:8] == b"\x89PNG\r\n\x1a\n"
         width, height = struct.unpack(">II", header[16:24])
         assert (width, height) == (1920, 1080)
+
+
+async def test_custom_tmp_root_places_output_under_it(tmp_path: Path) -> None:
+    custom_root = tmp_path / "my_tmp_root"
+
+    task = asyncio.create_task(
+        run_download(DownloadInput(local_pptx_path=SAMPLE_PPTX, tmp_root=str(custom_root)))
+    )
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=30.0)
+    state.approval_event.set()
+    output = await asyncio.wait_for(task, timeout=5.0)
+
+    # The copied .pptx and every slide-image PNG land under
+    # <tmp_root>/videogen_download_*/, not the OS default temp dir.
+    work_dir = Path(output.local_pptx_path).parent
+    assert work_dir.parent == custom_root
+    assert work_dir.name.startswith("videogen_download_")
+    for image_path in output.slide_image_paths:
+        assert Path(image_path).parent == work_dir
 
 
 async def _wait_for_status(target: StepStatus) -> None:

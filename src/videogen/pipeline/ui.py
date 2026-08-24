@@ -32,7 +32,13 @@ _DEMO_PPTX_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "
 
 
 def _download_input(request_data: dict[str, Any]) -> download.DownloadInput:
-    return download.DownloadInput(local_pptx_path=str(_DEMO_PPTX_PATH))
+    # Per specs/2026-08-23-download-input-config/requirements.md: both
+    # fields are optional and read live from the UI, never persisted beyond
+    # the in-flight run; a blank/absent value falls back to today's
+    # behavior (the checked-in demo fixture, OS default temp dir).
+    local_pptx_path = request_data.get("local_pptx_path") or str(_DEMO_PPTX_PATH)
+    tmp_root = request_data.get("tmp_root") or None
+    return download.DownloadInput(local_pptx_path=local_pptx_path, tmp_root=tmp_root)
 
 
 def _notes_extraction_input(request_data: dict[str, Any]) -> notes_extraction.NotesExtractionInput:

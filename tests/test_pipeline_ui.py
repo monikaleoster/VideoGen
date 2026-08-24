@@ -6,7 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from videogen.app import app
-from videogen.pipeline import download, notes_extraction, tts
+from videogen.pipeline import download, embed, notes_extraction, tts, workdir
 
 
 @pytest.fixture(autouse=True)
@@ -15,7 +15,7 @@ def _reset_step_states():
 
     from videogen.pipeline.base import StepStatus
 
-    for module in (download, notes_extraction, tts):
+    for module in (download, notes_extraction, tts, embed):
         module.state.status = StepStatus.PENDING
         module.state.output = None
         # A fresh Event, not .clear() — Event binds to whichever event loop
@@ -24,7 +24,9 @@ def _reset_step_states():
         # deadlocks (the bound-loop check silently fails the waiting task).
         module.state.approval_event = asyncio.Event()
     tts._current_work_dir = None
+    workdir.set_tmp_root(None)
     yield
+    workdir.set_tmp_root(None)
 
 
 @pytest.fixture
@@ -236,3 +238,73 @@ async def test_get_slide_audio_returns_the_real_generated_mp3(client, silent_mp3
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "audio/mpeg"
     assert resp.content == silent_mp3_bytes
+
+
+@pytest.mark.asyncio
+async def test_index_route_has_download_config_fields(client):
+    async with client as ac:
+        resp = await ac.get("/")
+    assert 'data-role="pptx-path"' in resp.text
+    assert 'data-role="tmp-root"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_download_with_blank_fields_uses_demo_fixture_no_regression(client):
+    async with client as ac:
+        run_resp = await ac.post("/pipeline/download/run", json={"local_pptx_path": "", "tmp_root": ""})
+        assert run_resp.json() == {"status": "waiting_approval"}
+
+    demo_fixture = Path(__file__).resolve().parent / "fixtures" / "sample_deck.pptx"
+    output = download.state.output
+    assert Path(output.local_pptx_path).name == demo_fixture.name
+    # No custom root was supplied, so the work dir must not be nested under
+    # any caller-chosen directory — it lands straight in the OS temp dir.
+    import tempfile
+
+    assert Path(output.local_pptx_path).parent.parent == Path(tempfile.gettempdir())
+
+
+@pytest.mark.asyncio
+async def test_download_with_custom_pptx_path_converts_that_file_not_the_demo(client, tmp_path: Path):
+    demo_fixture = Path(__file__).resolve().parent / "fixtures" / "sample_deck.pptx"
+    custom_pptx = tmp_path / "my_custom_deck.pptx"
+    custom_pptx.write_bytes(demo_fixture.read_bytes())
+
+    async with client as ac:
+        run_resp = await ac.post("/pipeline/download/run", json={"local_pptx_path": str(custom_pptx)})
+        assert run_resp.json() == {"status": "waiting_approval"}
+
+    output = download.state.output
+    assert Path(output.local_pptx_path).name == "my_custom_deck.pptx"
+
+
+@pytest.mark.asyncio
+async def test_custom_tmp_root_shared_across_download_tts_and_embed(client, tmp_path: Path, silent_mp3_bytes):
+    custom_root = tmp_path / "shared_run_root"
+
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        async with client as ac:
+            run_resp = await ac.post("/pipeline/download/run", json={"tmp_root": str(custom_root)})
+            assert run_resp.json() == {"status": "waiting_approval"}
+            await ac.post("/pipeline/download/approve")
+
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+            await ac.post("/pipeline/tts/approve")
+
+            await ac.post("/pipeline/audio_upload/run")
+            await ac.post("/pipeline/audio_upload/approve")
+
+            await ac.post("/pipeline/embed/run")
+            await ac.post("/pipeline/embed/approve")
+
+    download_work_dir = Path(download.state.output.local_pptx_path).parent
+    assert download_work_dir.parent == custom_root
+
+    tts_work_dir = Path(tts.state.output.audio_paths[0]).parent
+    assert tts_work_dir.parent == custom_root
+
+    embed_dirs = list(custom_root.glob("videogen_embed_*"))
+    assert len(embed_dirs) == 1

@@ -9,13 +9,13 @@ retried — the human re-runs manually via the existing Reject action.
 
 import asyncio
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from elevenlabs.client import ElevenLabs
 from elevenlabs.types.voice_settings import VoiceSettings
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
 
 # Fixed per specs/2026-08-23-audio-generation-real/requirements.md — not
@@ -102,7 +102,7 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
     state.output = None
     state.approval_event.clear()
 
-    work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
+    work_dir = workdir.make_work_dir(prefix="videogen_tts_")
     _current_work_dir = work_dir
 
     audio_paths: list[str | None] = []
@@ -143,7 +143,7 @@ async def regenerate_slide(index: int, text: str, api_key: str, voice_id: str) -
     global _current_work_dir
 
     if _current_work_dir is None:
-        _current_work_dir = Path(tempfile.mkdtemp(prefix="videogen_tts_"))
+        _current_work_dir = workdir.make_work_dir(prefix="videogen_tts_")
 
     out_path = _current_work_dir / f"slide_{index + 1:02d}.mp3"
     duration = await asyncio.to_thread(_generate_one, text, api_key, voice_id, out_path)

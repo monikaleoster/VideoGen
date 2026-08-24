@@ -27,6 +27,12 @@
       <span class="status status-pending" data-role="status">pending</span>
     </div>
     <pre data-role="output" hidden></pre>
+    {% if step.name == "download" %}
+    <div data-role="download-config" style="margin-bottom: 0.5rem;">
+      <input type="text" data-role="pptx-path" placeholder="PPT file path (blank = demo fixture)" autocomplete="off" style="width: 45%;">
+      <input type="text" data-role="tmp-root" placeholder="Tmp folder (blank = OS default)" autocomplete="off" style="width: 45%;">
+    </div>
+    {% endif %}
     {% if step.name == "tts" %}
     <div data-role="credentials" style="margin-bottom: 0.5rem;">
       <input type="password" data-role="api-key" placeholder="ElevenLabs API key" autocomplete="off">
@@ -187,9 +193,19 @@ function ttsCredentials(row) {
   };
 }
 
+// Mirrors ttsCredentials: read live from the DOM at Run/Reject time, never
+// persisted beyond the in-flight request (per
+// specs/2026-08-23-download-input-config).
+function downloadConfig(row) {
+  return {
+    local_pptx_path: row.querySelector('[data-role="pptx-path"]')?.value ?? "",
+    tmp_root: row.querySelector('[data-role="tmp-root"]')?.value ?? "",
+  };
+}
+
 async function postAction(step, action) {
   const row = document.querySelector(`.step[data-step="${step}"]`);
-  const body = step === "tts" ? ttsCredentials(row) : {};
+  const body = step === "tts" ? ttsCredentials(row) : step === "download" ? downloadConfig(row) : {};
   await fetch(`/pipeline/${step}/${action}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

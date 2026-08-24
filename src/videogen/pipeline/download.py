@@ -10,10 +10,10 @@ to slide-image PNGs. Real Google Drive integration is deferred.
 import asyncio
 import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
 
 SLIDE_WIDTH_PX = 1920
@@ -23,6 +23,7 @@ SLIDE_HEIGHT_PX = 1080
 @dataclass
 class DownloadInput:
     local_pptx_path: str
+    tmp_root: str | None = None
 
 
 @dataclass
@@ -104,8 +105,10 @@ async def run_download(step_input: DownloadInput) -> DownloadOutput:
     state.output = None
     state.approval_event.clear()
 
+    workdir.set_tmp_root(step_input.tmp_root)
+
     source_path = Path(step_input.local_pptx_path)
-    work_dir = Path(tempfile.mkdtemp(prefix="videogen_download_"))
+    work_dir = workdir.make_work_dir(prefix="videogen_download_")
     local_copy = work_dir / source_path.name
     shutil.copy2(source_path, local_copy)
 

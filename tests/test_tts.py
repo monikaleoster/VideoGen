@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from videogen.pipeline import tts as tts_module
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepStatus
 from videogen.pipeline.tts import TtsInput, regenerate_slide, run_tts, state
 
@@ -16,11 +17,13 @@ def reset_state():
     state.output = None
     state.approval_event = asyncio.Event()
     tts_module._current_work_dir = None
+    workdir.set_tmp_root(None)
     yield
     state.status = StepStatus.PENDING
     state.output = None
     state.approval_event = asyncio.Event()
     tts_module._current_work_dir = None
+    workdir.set_tmp_root(None)
 
 
 @pytest.fixture
@@ -157,6 +160,30 @@ async def test_step_blocks_until_approved(silent_mp3_bytes) -> None:
             await task
         except asyncio.CancelledError:
             pass
+
+
+async def test_work_dir_nests_under_shared_tmp_root_when_set(tmp_path: Path, silent_mp3_bytes) -> None:
+    custom_root = tmp_path / "shared_root"
+    workdir.set_tmp_root(str(custom_root))
+
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
+        task = asyncio.create_task(
+            run_tts(
+                TtsInput(
+                    notes=["Hello."],
+                    has_notes=[True],
+                    api_key="fake-key",
+                    voice_id="fake-voice",
+                )
+            )
+        )
+        await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
+        state.approval_event.set()
+        output = await asyncio.wait_for(task, timeout=10.0)
+
+    work_dir = Path(output.audio_paths[0]).parent
+    assert work_dir.parent == custom_root
+    assert work_dir.name.startswith("videogen_tts_")
 
 
 async def _wait_for_status(target: StepStatus) -> None:

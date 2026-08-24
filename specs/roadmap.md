@@ -58,11 +58,16 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 ## Phase 5 — Video generation (already validated, re-validate)
 - Re-validate the existing video generation step (slide images + audio →
   final MP4) against real images from Phase 4, replacing the placeholder
-  images used previously.
+  images used previously. Real ffmpeg per-slide segment rendering
+  (static image + real audio track), concatenated in order; a slide with
+  no audio gets a fixed 3-second silent fallback segment rather than
+  being dropped. Real duration measured via ffprobe.
 - **Validate:** output duration/sync matches expected values, both audio
   and video streams present, graceful fallback for a slide with no audio.
-- Status: ✅ (done against placeholders; re-validation against real images
-  pending as this phase is reached)
+- Status: ✅ (re-validated against real Phase 4/7 inputs 2026-08-23 — see
+  `specs/2026-08-23-render-real-and-logging/`; previously marked done
+  against placeholders only, which was misleading — the step was still a
+  full stub until this work)
 
 ## Phase 6 — Notes extraction (real)
 - Replace the mock notes-extraction step with real `python-pptx` parsing
@@ -87,30 +92,27 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   CLI-only exception.
 - **Validate:** generate audio for 1–2 sample notes; confirm audio quality
   and duration are as expected.
-- Status: 🚧 (implementation done, automated tests pass against a mocked
-  ElevenLabs client — no real ElevenLabs network access available in the
-  implementing sandbox; real-credential audio quality/duration check
-  still owed by a human before this phase is marked ✅)
+- Status: ✅ (real-credential audio quality/duration check completed and
+  approved by the human 2026-08-23)
 
 ## Phase 8 — Embed audio into PPTX (real)
 - Replace the mock embed step with real `python-pptx` logic: insert each
-  slide's audio clip and set it to autoplay on slide entry. A slide with
-  no notes (`has_notes=False`, so no TTS clip) gets a 1-second silent
-  placeholder instead, so every slide ends up with exactly one audio
-  element. Re-running the step against the same source deck is safe — any
-  previously-embedded audio on a slide is replaced, never duplicated (see
-  `specs/2026-08-23-embed-audio-pptx/requirements.md`).
+  slide's audio clip and set it to autoplay on slide entry (a manual
+  `p:timing` XML edit — `add_movie` alone only wires click-to-play).
+  Slides with no audio (Phase 6/7's `None` entries) are left untouched.
+  Output is a new local `_with_audio.pptx` file, original never modified
+  — no Drive involvement. Failures propagate visibly, no auto-retry.
+  Wiring correction: `embed`'s real audio-path input comes from `tts`'s
+  output directly, not the still-mocked `audio_upload` step's fake Drive
+  IDs (see `specs/2026-08-23-embed-audio-real/requirements.md`).
 - Depends on Phases 6 and 7 both being real.
-- **Validate:** open the resulting `.pptx`; autoplay audio is present on
-  the correct slides.
-- Status: 🚧 (implementation done, automated tests pass — 42/42, including
-  real-clip/placeholder/autoplay-XML/re-run coverage; structural validity
-  confirmed via `python-pptx` inspection and a LibreOffice headless
-  round-trip — no real Microsoft PowerPoint available in the implementing
-  sandbox to confirm the autoplay-on-entry behavior actually triggers
-  without a click; that check is still owed by a human before this phase
-  is marked ✅, see
-  `specs/2026-08-23-embed-audio-pptx/validation.md`)
+- **Validate:** automated XML/structure check confirming an autoplay
+  trigger (not click-only) on every audio-bearing slide; a real
+  PowerPoint/LibreOffice playback check is optional corroboration, not
+  required for this phase's sign-off (confirmed deviation from the
+  original "open the resulting .pptx" wording, which implied manual-only
+  validation).
+- Status: ✅
 
 ## Phase 9 — Drive upload (audio + final video)
 - Replace the mock upload steps with real Drive uploads for generated

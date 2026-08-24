@@ -14,6 +14,7 @@ in a work directory created via `workdir.make_work_dir`.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from pptx import Presentation
 
 from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,11 +53,12 @@ def _extract_notes(pptx_path: str) -> tuple[list[str], list[bool]]:
 
     notes: list[str] = []
     has_notes: list[bool] = []
-    for slide in presentation.slides:
+    for i, slide in enumerate(presentation.slides, start=1):
         raw_text = slide.notes_slide.notes_text_frame.text if slide.has_notes_slide else ""
         stripped = raw_text.strip()
         notes.append(stripped)
         has_notes.append(bool(stripped))
+        logger.debug("Slide %d: has_notes=%s, %d char(s)", i, bool(stripped), len(stripped))
 
     return notes, has_notes
 
@@ -75,6 +79,7 @@ async def run_notes_extraction(step_input: NotesExtractionInput) -> NotesExtract
     state.status = StepStatus.RUNNING
     state.output = None
     state.approval_event.clear()
+    logger.info("notes_extraction starting: local_pptx_path=%s", step_input.local_pptx_path)
 
     # python-pptx parsing is blocking (file I/O + XML parsing) — run it off
     # the event loop thread so the WebSocket status push keeps working.
@@ -88,6 +93,10 @@ async def run_notes_extraction(step_input: NotesExtractionInput) -> NotesExtract
         notes=notes,
         has_notes=has_notes,
         notes_file_paths=notes_file_paths,
+    )
+    logger.info(
+        "notes_extraction complete: %d slide(s), %d with notes",
+        output.slide_count, sum(has_notes),
     )
     state.output = output
     state.status = StepStatus.WAITING_APPROVAL

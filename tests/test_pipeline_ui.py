@@ -279,6 +279,62 @@ async def test_download_with_custom_pptx_path_converts_that_file_not_the_demo(cl
 
 
 @pytest.mark.asyncio
+async def test_index_route_has_notes_slides_container(client):
+    async with client as ac:
+        resp = await ac.get("/")
+    assert 'data-role="notes-slides"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_get_notes_slide_before_any_run_is_404(client):
+    async with client as ac:
+        resp = await ac.get("/pipeline/notes_extraction/slide/0/notes")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_notes_slide_out_of_range_is_404(client):
+    async with client as ac:
+        await ac.post("/pipeline/download/run")
+        await ac.post("/pipeline/download/approve")
+        await ac.post("/pipeline/notes_extraction/run")
+
+        resp = await ac.get("/pipeline/notes_extraction/slide/99/notes")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_notes_slide_served_at_waiting_approval_and_done(client):
+    async with client as ac:
+        await ac.post("/pipeline/download/run")
+        await ac.post("/pipeline/download/approve")
+        run_resp = await ac.post("/pipeline/notes_extraction/run")
+        assert run_resp.json() == {"status": "waiting_approval"}
+
+        status_resp = await ac.get("/pipeline/status")
+        notes = status_resp.json()["notes_extraction"]["output"]["notes"]
+
+        # Served correctly while still waiting_approval...
+        resp_waiting = await ac.get("/pipeline/notes_extraction/slide/0/notes")
+        assert resp_waiting.status_code == 200
+        assert resp_waiting.headers["content-type"].startswith("text/plain")
+        assert resp_waiting.text == notes[0]
+
+        # The no-notes slide serves an empty body, not a 404.
+        resp_empty = await ac.get("/pipeline/notes_extraction/slide/2/notes")
+        assert resp_empty.status_code == 200
+        assert resp_empty.text == ""
+
+        # ...and again after approval (status flips to done).
+        approve_resp = await ac.post("/pipeline/notes_extraction/approve")
+        assert approve_resp.json() == {"status": "done"}
+
+        resp_done = await ac.get("/pipeline/notes_extraction/slide/1/notes")
+        assert resp_done.status_code == 200
+        assert resp_done.text == notes[1]
+
+
+@pytest.mark.asyncio
 async def test_custom_tmp_root_shared_across_download_tts_and_embed(client, tmp_path: Path, silent_mp3_bytes):
     custom_root = tmp_path / "shared_run_root"
 

@@ -303,6 +303,23 @@ async def get_tts_slide_audio(index: int) -> FileResponse:
     return FileResponse(audio_path, media_type="audio/mpeg")
 
 
+@router.get("/pipeline/notes_extraction/slide/{index}/notes")
+async def get_notes_extraction_slide_notes(index: int) -> FileResponse:
+    """Serve a slide's extracted notes as plain text so it can be linked/
+    downloaded directly from the UI instead of the human having to locate
+    the file on disk."""
+    if notes_extraction.state.output is None or not (
+        0 <= index < len(notes_extraction.state.output.notes_file_paths)
+    ):
+        raise HTTPException(status_code=404, detail=f"No notes for slide {index}")
+
+    notes_path = notes_extraction.state.output.notes_file_paths[index]
+    if not Path(notes_path).exists():
+        raise HTTPException(status_code=404, detail=f"No notes file generated yet for slide {index}")
+
+    return FileResponse(notes_path, media_type="text/plain")
+
+
 @router.websocket("/ws/pipeline-status")
 async def ws_pipeline_status(websocket: WebSocket) -> None:
     await websocket.accept()

@@ -149,7 +149,11 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   UI — mirroring the existing per-slide audio link pattern from `tts`.
 - **Validate:** one file per slide, byte-for-byte matching extracted
   text; every slide has a working UI link, including the no-notes one.
-- Status: ⬜ (see `specs/2026-08-23-notes-text-files/`)
+- Status: ✅ (see `specs/2026-08-23-notes-text-files/`; fully automatable
+  validation bar — one file per slide byte-for-byte matching extracted
+  text (including the empty no-notes file), route serving at both
+  `waiting_approval` and `done`, 404s, and the UI link container all
+  covered by automated tests, 59/59 passing)
 
 ## Phase 13 — TTS step: "Run" stops auto-generating audio
 - UX/cost-safety improvement on top of Phase 7: the approval-gate UI's

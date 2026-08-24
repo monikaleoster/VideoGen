@@ -40,6 +40,9 @@
     </div>
     <div data-role="tts-slides"></div>
     {% endif %}
+    {% if step.name == "notes_extraction" %}
+    <div data-role="notes-slides"></div>
+    {% endif %}
     <div data-role="actions"></div>
   </div>
 {% endfor %}
@@ -79,6 +82,41 @@ function render(snapshot) {
     if (name === "tts") {
       renderTtsSlides(row, step, snapshot.notes_extraction);
     }
+    if (name === "notes_extraction") {
+      renderNotesSlides(row, step);
+    }
+  }
+}
+
+// Rebuilds the per-slide link list only when the number of slides changes
+// (a fresh run), mirroring renderTtsSlides but simpler — just a link per
+// slide, no text input or Generate button.
+function renderNotesSlides(row, notesStep) {
+  const container = row.querySelector('[data-role="notes-slides"]');
+  const hasNotes = notesStep.output?.has_notes ?? [];
+
+  if (hasNotes.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  if (container.dataset.slideCount !== String(hasNotes.length)) {
+    container.innerHTML = "";
+    container.dataset.slideCount = String(hasNotes.length);
+
+    hasNotes.forEach((slideHasNotes, i) => {
+      const slideRow = document.createElement("div");
+      slideRow.dataset.slideIndex = String(i);
+      slideRow.style.marginBottom = "0.25rem";
+
+      const link = document.createElement("a");
+      link.href = `/pipeline/notes_extraction/slide/${i}/notes`;
+      link.target = "_blank";
+      link.textContent = `Slide ${i + 1} notes${slideHasNotes ? "" : " (no notes)"}`;
+
+      slideRow.appendChild(link);
+      container.appendChild(slideRow);
+    });
   }
 }
 

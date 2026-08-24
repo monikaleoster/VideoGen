@@ -3,7 +3,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from lxml import etree
 from pptx import Presentation
 
 from videogen.pipeline import workdir
@@ -110,22 +109,23 @@ async def test_missing_audio_file_fails_without_partial_output(tmp_path) -> None
 
 
 async def test_work_dir_nests_under_shared_tmp_root_when_set(
-    tmp_path: Path, deck_path: str, real_clip: str
+    tmp_path: Path, silent_mp3_path: str
 ) -> None:
     custom_root = tmp_path / "shared_root"
     workdir.set_tmp_root(str(custom_root))
 
-    task = asyncio.create_task(run_embed(EmbedInput(local_pptx_path=deck_path, audio_paths=[real_clip, None, None])))
-    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=5.0)
+    task = asyncio.create_task(
+        run_embed(EmbedInput(local_pptx_path=SAMPLE_PPTX, audio_paths=[silent_mp3_path, None, None]))
+    )
+    await asyncio.wait_for(_wait_for_status(StepStatus.WAITING_APPROVAL), timeout=10.0)
     state.approval_event.set()
-    await asyncio.wait_for(task, timeout=5.0)
+    output = await asyncio.wait_for(task, timeout=10.0)
 
-    # embed's own work dir (holding the generated silence.mp3) isn't
-    # surfaced in its output, so confirm nesting by inspecting the root
-    # directly: exactly one videogen_embed_* dir was created under it.
+    # embed's work dir (holding the output .pptx) nests under the shared
+    # root instead of the OS default temp location.
     embed_dirs = list(custom_root.glob("videogen_embed_*"))
     assert len(embed_dirs) == 1
-    assert (embed_dirs[0] / "silence.mp3").exists()
+    assert Path(output.updated_pptx_path).parent == embed_dirs[0]
 
 
 async def _wait_for_status(target: StepStatus) -> None:

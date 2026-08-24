@@ -12,10 +12,10 @@ crashing the render.
 import asyncio
 import logging
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from videogen.pipeline import workdir
 from videogen.pipeline.base import StepState, StepStatus
 
 logger = logging.getLogger(__name__)
@@ -134,7 +134,7 @@ async def run_render(step_input: RenderInput) -> RenderOutput:
         slide_count, slide_count - no_audio_count, no_audio_count,
     )
 
-    work_dir = Path(tempfile.mkdtemp(prefix="videogen_render_"))
+    work_dir = workdir.make_work_dir(prefix="videogen_render_")
 
     # ffmpeg/ffprobe work is blocking — run it off the event loop thread so
     # the WebSocket status push keeps working during rendering.

@@ -50,9 +50,10 @@
 
 <script>
 // The tts step's API key / voice ID fields are read live from the DOM at
-// Run/Reject time and never written to localStorage, cookies, or any
-// server-side file — they exist only in this page's in-memory state for
-// the run being submitted (per specs/2026-08-23-audio-generation-real).
+// Generate/Generate All time (the only actions that call ElevenLabs, per
+// specs/2026-08-23-tts-run-no-autogenerate) and never written to
+// localStorage, cookies, or any server-side file — they exist only in this
+// page's in-memory state for the request being submitted.
 function render(snapshot) {
   for (const [name, step] of Object.entries(snapshot)) {
     const row = document.querySelector(`.step[data-step="${name}"]`);
@@ -140,9 +141,7 @@ function renderTtsSlides(row, ttsStep, notesStep) {
     container.innerHTML = "";
     container.dataset.slideCount = String(audioPaths.length);
 
-    const generateAllBtn = makeButton("Generate All", () =>
-      postAction("tts", ttsStep.status === "pending" ? "run" : "reject")
-    );
+    const generateAllBtn = makeButton("Generate All", () => generateAllSlides(row));
     generateAllBtn.style.marginBottom = "0.5rem";
     container.appendChild(generateAllBtn);
 
@@ -203,6 +202,23 @@ function renderTtsSlides(row, ttsStep, notesStep) {
       delete audioPlayer.dataset.loadedFor;
     }
   });
+}
+
+// "Generate All": sequentially hits the same per-slide endpoint each row's
+// own "Generate" button uses, in index order, awaiting each before moving
+// to the next (no concurrent burst against ElevenLabs). Per
+// specs/2026-08-23-tts-run-no-autogenerate/requirements.md, this button no
+// longer calls the tts step's Run/Reject action. Blank text boxes are
+// skipped, mirroring the per-slide route's own reject-blank-text behavior.
+async function generateAllSlides(ttsRow) {
+  const container = ttsRow.querySelector('[data-role="tts-slides"]');
+  const slideRows = container.querySelectorAll("[data-slide-index]");
+  for (const slideRow of slideRows) {
+    const index = Number(slideRow.dataset.slideIndex);
+    const text = slideRow.querySelector('[data-role="slide-text"]')?.value ?? "";
+    if (!text.trim()) continue;
+    await generateSlide(ttsRow, index);
+  }
 }
 
 async function generateSlide(ttsRow, index) {

@@ -47,22 +47,15 @@ def _notes_extraction_input(request_data: dict[str, Any]) -> notes_extraction.No
     )
 
 
-def _tts_input(request_data: dict[str, Any]) -> tts.TtsInput:
-    # Per-run credentials only — entered through the UI, held in memory for
-    # this request only, never persisted (per
-    # specs/2026-08-23-audio-generation-real/requirements.md).
-    api_key = request_data.get("api_key")
-    voice_id = request_data.get("voice_id")
-    if not api_key or not voice_id:
-        raise HTTPException(
-            status_code=422,
-            detail="'api_key' and 'voice_id' are both required to run the tts step",
-        )
-    return tts.TtsInput(
+def _tts_prepare_input(request_data: dict[str, Any]) -> tts.TtsPrepareInput:
+    # Per specs/2026-08-23-tts-run-no-autogenerate/requirements.md: Run/
+    # Reject on the tts step only prepares the per-slide list (text, no
+    # audio) — no ElevenLabs call, so no api_key/voice_id needed here. The
+    # per-slide `/pipeline/tts/slide/{index}/generate` route (below) keeps
+    # its own credential requirement unchanged.
+    return tts.TtsPrepareInput(
         notes=notes_extraction.state.output.notes,
         has_notes=notes_extraction.state.output.has_notes,
-        api_key=api_key,
-        voice_id=voice_id,
     )
 
 
@@ -116,7 +109,9 @@ STEPS: list[_StepEntry] = [
         _notes_extraction_input,
         "download",
     ),
-    _StepEntry("tts", "Text-to-Speech", tts.run_tts, tts.state, _tts_input, "notes_extraction"),
+    _StepEntry(
+        "tts", "Text-to-Speech", tts.prepare_tts, tts.state, _tts_prepare_input, "notes_extraction"
+    ),
     _StepEntry(
         "audio_upload",
         "Audio Upload",
@@ -235,17 +230,13 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
             detail=f"Step '{step_name}' is not waiting for approval (status={step.state.status.value})",
         )
 
+    # Clear the stale WAITING_APPROVAL before starting the fresh run so
+    # `_await_step_settled` can't mistake the old status for the new run
+    # having already settled — a real risk once a run_fn (like
+    # `tts.prepare_tts`) can reach WAITING_APPROVAL synchronously, before
+    # this coroutine gets a chance to observe the transition.
+    step.state.status = StepStatus.PENDING
     task = asyncio.create_task(step.run_fn(step.build_input(request_data or {})))
-    # Wait for the fresh run to actually start (status flips away from the
-    # stale WAITING_APPROVAL) before waiting for it to settle again —
-    # otherwise we'd see the old status and return immediately.
-    while step.state.status == StepStatus.WAITING_APPROVAL:
-        if task.done() and task.exception() is not None:
-            exc = task.exception()
-            step.state.status = StepStatus.PENDING
-            step.state.output = None
-            raise HTTPException(status_code=502, detail=f"Step '{step_name}' failed: {exc}")
-        await asyncio.sleep(0.01)
     await _await_step_settled(step, task)
     return {"status": step.state.status.value}
 
@@ -253,10 +244,10 @@ async def reject_step(step_name: str, request_data: dict[str, Any] | None = Body
 @router.post("/pipeline/tts/slide/{index}/generate")
 async def generate_tts_slide(index: int, request_data: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Regenerate a single slide's audio in place, independent of the rest
-    of the tts step's output — for the per-slide "Generate" button. Also
-    backs the "Generate All" flow's per-slide entries when a slide's text
-    override differs from the notes_extraction text (the whole-step
-    Run/Reject path is used when no per-slide overrides are needed)."""
+    of the tts step's output — for the per-slide "Generate" button, and
+    (per specs/2026-08-23-tts-run-no-autogenerate/requirements.md) called
+    sequentially once per slide by "Generate All" as well, since the tts
+    step's Run/Reject no longer generates any audio itself."""
     if tts.state.output is None:
         raise HTTPException(
             status_code=409,

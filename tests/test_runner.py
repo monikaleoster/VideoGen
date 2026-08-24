@@ -27,8 +27,8 @@ def silent_mp3_bytes(tmp_path: Path) -> bytes:
 
 @pytest.fixture(autouse=True)
 def mock_elevenlabs(silent_mp3_bytes):
-    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes):
-        yield
+    with patch("videogen.pipeline.tts._synthesize", return_value=silent_mp3_bytes) as mock_synth:
+        yield mock_synth
 
 
 _ALL_STATES = [
@@ -108,7 +108,7 @@ async def test_steps_run_in_fixed_order_and_none_skip_ahead() -> None:
         assert prev_done < this_running
 
 
-async def test_chained_output_threads_through_the_pipeline() -> None:
+async def test_chained_output_threads_through_the_pipeline(mock_elevenlabs) -> None:
     approver = asyncio.create_task(_approve_in_order([]))
     output = await asyncio.wait_for(
         run_pipeline(local_pptx_path=SAMPLE_PPTX, elevenlabs_api_key="fake-key", elevenlabs_voice_id="fake-voice"), timeout=30.0
@@ -126,6 +126,13 @@ async def test_chained_output_threads_through_the_pipeline() -> None:
     assert output is video_upload.state.output
     assert output.drive_file_id
     assert output.drive_url
+
+    # Confirms the CLI path (run_pipeline -> tts.run_tts) is untouched by
+    # the tts.prepare_tts split (specs/2026-08-23-tts-run-no-autogenerate):
+    # it still calls the real (mocked) ElevenLabs client and produces real
+    # audio for every slide with notes, with no manual "Generate" step.
+    mock_elevenlabs.assert_called()
+    assert any(path is not None for path in tts.state.output.audio_paths)
 
 
 async def test_full_run_reaches_video_upload_done() -> None:

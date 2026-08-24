@@ -232,7 +232,11 @@ async def test_get_slide_audio_returns_the_real_generated_mp3(client, silent_mp3
             await ac.post("/pipeline/download/approve")
             await ac.post("/pipeline/notes_extraction/run")
             await ac.post("/pipeline/notes_extraction/approve")
-            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+            await ac.post("/pipeline/tts/run")
+            await ac.post(
+                "/pipeline/tts/slide/0/generate",
+                json={"api_key": "k", "voice_id": "v", "text": "Hello slide one."},
+            )
 
             resp = await ac.get("/pipeline/tts/slide/0/audio")
     assert resp.status_code == 200
@@ -335,6 +339,95 @@ async def test_get_notes_slide_served_at_waiting_approval_and_done(client):
 
 
 @pytest.mark.asyncio
+async def test_tts_run_prepares_slides_with_no_audio_and_no_elevenlabs_call(client):
+    """Per specs/2026-08-23-tts-run-no-autogenerate: Run on tts populates
+    per-slide rows (text, no audio) and reaches waiting_approval without
+    ever calling ElevenLabs — and no api_key/voice_id is required."""
+    with patch("videogen.pipeline.tts._synthesize") as mock_synth:
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            run_resp = await ac.post("/pipeline/tts/run")
+            assert run_resp.json() == {"status": "waiting_approval"}
+
+            status_resp = await ac.get("/pipeline/status")
+            tts_output = status_resp.json()["tts"]["output"]
+
+    mock_synth.assert_not_called()
+    assert tts_output["audio_paths"] == [None, None, None]
+    assert tts_output["durations_sec"] == [None, None, None]
+
+
+@pytest.mark.asyncio
+async def test_tts_reject_reprepares_without_calling_elevenlabs(client):
+    with patch("videogen.pipeline.tts._synthesize") as mock_synth:
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+
+            await ac.post("/pipeline/tts/run")
+
+            reject_resp = await ac.post("/pipeline/tts/reject")
+            assert reject_resp.json() == {"status": "waiting_approval"}
+
+            status_resp = await ac.get("/pipeline/status")
+            tts_output = status_resp.json()["tts"]["output"]
+
+    mock_synth.assert_not_called()
+    assert tts_output["audio_paths"] == [None, None, None]
+    assert tts_output["durations_sec"] == [None, None, None]
+
+
+@pytest.mark.asyncio
+async def test_generate_all_flow_generates_audio_for_every_non_blank_slide_in_order(client, silent_mp3_bytes):
+    """Mirrors what the "Generate All" button now does (per
+    specs/2026-08-23-tts-run-no-autogenerate): sequentially call the
+    per-slide generate route for every slide row, skipping blank text,
+    same end result as today's full-run behavior."""
+    call_order: list[int] = []
+
+    def fake_synth(text: str, api_key: str, voice_id: str) -> bytes:
+        call_order.append(int(voice_id.split("-")[-1]))
+        return silent_mp3_bytes
+
+    with patch("videogen.pipeline.tts._synthesize", side_effect=fake_synth):
+        async with client as ac:
+            await ac.post("/pipeline/download/run")
+            await ac.post("/pipeline/download/approve")
+            await ac.post("/pipeline/notes_extraction/run")
+            await ac.post("/pipeline/notes_extraction/approve")
+            await ac.post("/pipeline/tts/run")
+
+            status_resp = await ac.get("/pipeline/status")
+            notes = status_resp.json()["notes_extraction"]["output"]["notes"]
+
+            # Fixture's slide 3 has no notes (blank text) and is skipped,
+            # mirroring the UI's blank-text-box skip.
+            for i, text in enumerate(notes):
+                if not text.strip():
+                    continue
+                resp = await ac.post(
+                    "/pipeline/tts/slide/{}/generate".format(i),
+                    json={"api_key": "k", "voice_id": f"v-{i}", "text": text},
+                )
+                assert resp.status_code == 200
+
+            final_status = await ac.get("/pipeline/status")
+            tts_output = final_status.json()["tts"]["output"]
+
+    assert call_order == [0, 1]
+    assert tts_output["audio_paths"][0] is not None
+    assert tts_output["audio_paths"][1] is not None
+    assert tts_output["audio_paths"][2] is None
+    assert tts_output["durations_sec"][2] is None
+
+
+@pytest.mark.asyncio
 async def test_custom_tmp_root_shared_across_download_tts_and_embed(client, tmp_path: Path, silent_mp3_bytes):
     custom_root = tmp_path / "shared_run_root"
 
@@ -347,7 +440,14 @@ async def test_custom_tmp_root_shared_across_download_tts_and_embed(client, tmp_
             await ac.post("/pipeline/notes_extraction/run")
             await ac.post("/pipeline/notes_extraction/approve")
 
-            await ac.post("/pipeline/tts/run", json={"api_key": "k", "voice_id": "v"})
+            await ac.post("/pipeline/tts/run")
+            # Run/Reject no longer generates any audio itself, so generate
+            # slide 0's audio directly to get a real tts work dir to assert
+            # on (per specs/2026-08-23-tts-run-no-autogenerate).
+            await ac.post(
+                "/pipeline/tts/slide/0/generate",
+                json={"api_key": "k", "voice_id": "v", "text": "Hello slide one."},
+            )
             await ac.post("/pipeline/tts/approve")
 
             await ac.post("/pipeline/audio_upload/run")

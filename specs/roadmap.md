@@ -164,7 +164,11 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
   end to end.
 - **Validate:** Run/Reject never call ElevenLabs; Generate All and
   per-slide Generate unaffected; CLI demo path unaffected.
-- Status: ⬜ (see `specs/2026-08-23-tts-run-no-autogenerate/`)
+- Status: ✅ (see `specs/2026-08-23-tts-run-no-autogenerate/`; automated
+  tests confirm Run/Reject build the per-slide list with zero ElevenLabs
+  calls, Generate All/per-slide Generate are unaffected, and the CLI demo
+  path (`run_tts`/`run_pipeline`) still auto-generates all audio end to
+  end)
 
 ## Open questions to resolve along the way
 

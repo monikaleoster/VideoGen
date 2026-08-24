@@ -33,6 +33,16 @@ class TtsInput:
 
 
 @dataclass
+class TtsPrepareInput:
+    """Slimmer input for `prepare_tts` — no ElevenLabs credentials needed to
+    build the empty per-slide list. Per
+    specs/2026-08-23-tts-run-no-autogenerate/requirements.md."""
+
+    notes: list[str]
+    has_notes: list[bool]
+
+
+@dataclass
 class TtsOutput:
     audio_paths: list[str | None]
     durations_sec: list[float | None]
@@ -126,6 +136,27 @@ async def run_tts(step_input: TtsInput) -> TtsOutput:
         durations_sec.append(duration)
 
     output = TtsOutput(audio_paths=audio_paths, durations_sec=durations_sec)
+    state.output = output
+    state.status = StepStatus.WAITING_APPROVAL
+
+    await state.approval_event.wait()
+
+    state.status = StepStatus.DONE
+    return output
+
+
+async def prepare_tts(step_input: TtsPrepareInput) -> TtsOutput:
+    """Run/Reject path for the approval-gate UI: builds the per-slide list
+    (text-only, no audio yet) without calling ElevenLabs, and blocks on
+    `state.approval_event` like every other step. Per
+    specs/2026-08-23-tts-run-no-autogenerate/requirements.md — `run_tts`
+    above is left completely unchanged for the CLI demo path."""
+    state.status = StepStatus.RUNNING
+    state.output = None
+    state.approval_event.clear()
+
+    n = len(step_input.notes)
+    output = TtsOutput(audio_paths=[None] * n, durations_sec=[None] * n)
     state.output = output
     state.status = StepStatus.WAITING_APPROVAL
 
